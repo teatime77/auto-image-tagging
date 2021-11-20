@@ -7,13 +7,14 @@ import numpy as np
 from operator import itemgetter
 import PySimpleGUI as sg
 from PIL import Image, ImageTk
-
+import random
 
 
 window_name = 'frame'
 bin_name = 'bin'
 playing = False
 RedBG=False
+csvFile = None
 
 H_lo =  90
 H_hi = 180
@@ -35,7 +36,10 @@ def printing(position):
 
 
 
-def initCap(video_path):
+def initCap():
+    global saveVideoPathes, saveVideoIdx
+
+    video_path = saveVideoPathes[saveVideoIdx]
 
     for img_path in glob.glob('tmp/*.png'):
         print(img_path)
@@ -69,7 +73,8 @@ def showImg(key, img):
 
     window[key].update(data=image_tk, size=(256,256))
 
-def readCap(cap):
+def readCap():
+    global cap, saveVideoPathes, saveVideoIdx, csvFile
 
     ret, frame = cap.read()
     if ret:
@@ -82,8 +87,20 @@ def readCap(cap):
 
     else:
 
-        setPlaying(False)
-        # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        saveVideoIdx += 1
+
+        if saveVideoIdx < len(saveVideoPathes):
+            cap.release()
+
+            cap = initCap()
+        else:
+
+            if csvFile is not None:
+                csvFile.close()
+                csvFile = None
+
+            setPlaying(False)
+            # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         
 def diffHue(hue):
     if hue < H_lo:
@@ -99,73 +116,111 @@ def showVideo(frame):
     # BGRからHSVに変換する。
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    # Hueを取り出す。
-    hue = hsv[:, :, 0]
-    diff_img = np.where(hue < H_lo, 90 + hue - H_lo, np.where(H_hi < hue, 90 + hue - H_hi, 90))
-
+    # HSVの範囲を0と255に2値化する。
     bin_img = cv2.inRange(hsv, (H_lo, S_lo, V_lo), (H_hi, S_hi, V_hi))
-    # print(type(bin_img), bin_img.shape)
+    assert(bin_img.shape == hsv.shape[:2])
 
+    # 二値化画像から輪郭のリストを得る。
     contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)   # RETR_EXTERNAL RETR_TREE
 
     # 輪郭と面積の対のリスト
     contour_areas = [ (x, cv2.contourArea(x)) for x in contours ]
 
-    # 面積が1000以上で全体画像の70%未満の輪郭を抽出
+    # 元画像の面積
     img_area = frame.shape[0] * frame.shape[1]
 
+    # 輪郭と面積の平方根の比の対のリスト
     contour_areas_ratio = [ (x[0], int(100 * np.sqrt(x[1]) / np.sqrt(img_area)) ) for x in contour_areas ]
     
+    # 面積の平方根が元画像の10%以上で70%未満の輪郭を抽出する。
     contour_areas_ratio = [ x for x in contour_areas_ratio if 10 <= x[1] and x[1] < 70 ]
 
     if len(contour_areas_ratio) != 1:
+        # 条件を満たす輪郭が1つでない場合
+
         return
 
-    print([ x[1] for x in contour_areas_ratio ])
+    # 対象の輪郭      
+    contour = contour_areas_ratio[0][0]
 
-    # 輪郭のリスト        
-    contours = [ x[0] for x in contour_areas_ratio ]
-
-
-    con_img = frame.copy()
-
+    # 輪郭から0と1の二値の内部のマスク画像を作る。
     mask_img = np.zeros(frame.shape, dtype=np.uint8)
+    cv2.drawContours(mask_img, [ contour ], -1, (1,1,1), -1)
 
-    # mask_img = cv2.drawContours(con_img, contours, -1, (0,255,0), -1)
-    cv2.drawContours(mask_img, contours, -1, (1,1,1), -1)
+    # 輪郭から0と1の二値の縁のマスク画像を作る。
+    edge_img = np.zeros(frame.shape, dtype=np.uint8)
+    cv2.drawContours(edge_img, [ contour ], -1, (1,1,1), 5)
 
-    dst_img = con_img * mask_img
+    # 元画像から
+    dst_img = frame * mask_img
 
-    x, y, w, h = cv2.boundingRect(contours[0])
+    x, y, w, h = cv2.boundingRect(contour)
 
 
     # rect_img = np.zeros(frame.shape, dtype=np.uint8)
     cv2.rectangle(dst_img, (x, y), (x+w, y+h), (0, 255, 0), 3)    
 
     rows, cols = frame.shape[:2]
-    xc = x + w // 2
-    yc = y+ h // 2
 
-    dx = cols // 2 - xc
-    dy = rows // 2 - yc
+    # 乱数でスケールを決める。
+    scale = random.uniform(0.5, 1)
 
+    # スケール変換する。
+    x, y, w, h =[ round(scale * x) for x in (x, y, w, h)]
+    
+    # 乱数で移動量を決める。
+    dx = random.randint(-x, cols - (x + w))
+    dy = random.randint(-y, rows - (y + h))
+
+    # スケールと平行移動の変換行列
     M = np.float32([
-        [1, 0, dx],
-        [0, 1, dy]
+        [scale,     0, dx],
+        [    0, scale, dy]
     ])
-    dst_img = cv2.warpAffine(dst_img, M, (cols, rows))
 
+    # 画像に変換行列を作用させる。
+    dst_img = cv2.warpAffine(dst_img, M, (cols, rows))
+    warp_img = cv2.warpAffine(frame, M, (cols, rows))
+    mask_img = cv2.warpAffine(mask_img, M, (cols, rows))
+    edge_img = cv2.warpAffine(edge_img, M, (cols, rows))
+
+    # 背景画像ファイルを読む。
     bg_img = cv2.imread(bgImgPaths[bgImgIdx])
     bgImgIdx = (bgImgIdx + 1) % len(bgImgPaths)
 
-    bg_img = cv2.resize(bg_img, dsize=dst_img.shape[:2])                    
+    # 背景画像を元画像と同じサイズにする。
+    bg_img = cv2.resize(bg_img, dsize=frame.shape[:2])                    
 
-    # print(mask_img.shape, bg_img.shape, dst_img.shape)
-    compo_img = np.where(mask_img == 0, bg_img, frame)
+    # 内部のマスクを使って、背景画像と元画像を合成する。
+    compo_img = np.where(mask_img == 0, bg_img, warp_img)
+
+    # 縁のマスクを使って、背景画像と元画像を合成する。
+    blend_img = cv2.addWeighted(bg_img, 0.7, warp_img, 0.3, 0.0)
+    compo_img = np.where(edge_img == 0, compo_img, blend_img)
+
+    # 矩形の左上と右下の座標
+    xmin, ymin, xmax, ymax = ( dx + x, dy + y, dx + x + w, dy + y + h )
+
+    pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+    test_img_path = os.path.join(test_img_dir, f'{saveVideoIdx}-{pos}.png')         
+    cv2.imwrite(test_img_path, compo_img)
+
+    file_name = os.path.basename(test_img_path)
+    csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax}\n')
+
+    # 矩形を描く。
+    cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
 
     showImg('-image11-', dst_img)
-    showImg('-image12-', diff_img)
     showImg('-image21-', compo_img)
+
+    # Hueを取り出す。
+    hue = hsv[:, :, 0]
+
+    # Hueの指定範囲からの差をグレースケールで表示する。
+    diff_img = np.where(hue < H_lo, 90 + hue - H_lo, np.where(H_hi < hue, 90 + hue - H_hi, 90))
+
+    showImg('-image12-', diff_img)
 
 def get_tree_data(video_dir):
     global video_pathes
@@ -241,6 +296,17 @@ def setPlaying(is_playing):
         window['-play/pause-'].update(text='Play')
         print('show play')
 
+def saveImgs(save_video_dir):
+    global cap, saveVideoPathes, saveVideoIdx, csvFile
+
+    saveVideoPathes = [ x for x in glob.glob(f'{save_video_dir}/*') if x in video_pathes]
+    saveVideoIdx = 0
+
+    csvFile = open('test.csv', 'w')
+    csvFile.write('image,xmin,ymin,xmax,ymax\n')
+
+    cap = initCap()
+
 if __name__ == '__main__':
     print(cv2.getBuildInformation())
 
@@ -260,6 +326,12 @@ if __name__ == '__main__':
 
     video_dir = sys.argv[1]
     bg_img_dir = sys.argv[2]
+
+    test_img_dir = sys.argv[3]
+    print(f'変換先:{test_img_dir}')
+    os.makedirs(test_img_dir, exist_ok=True)
+
+
     bgImgPaths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
     bgImgIdx = 0
 
@@ -295,7 +367,7 @@ if __name__ == '__main__':
         spin('V lo', V_lo, '-Vlo-') + spin('V hi', V_hi, '-Vhi-') + [ sg.Image(filename='', key='-Vbar-') ],
         [sg.Text('Some text on Row 1')],
         [sg.Text('Enter something on Row 2'), sg.InputText()],
-        [ sg.Button('Play', key='-play/pause-'), sg.Button('Ok'), sg.Button('Cancel')] ]
+        [ sg.Button('Play', key='-play/pause-'), sg.Button('Save', key='-save-'), sg.Button('Cancel')] ]
 
     # Create the Window
     window = sg.Window('Window Title', layout)
@@ -320,13 +392,17 @@ if __name__ == '__main__':
             break
 
         if event == '-tree-':
+            print(values[event])
             video_path = values[event][0]
             if video_path in video_pathes:
 
                 if cap is not None:
                     cap.release()
 
-                cap = initCap(video_path)
+                saveVideoPathes = [ video_path ]
+                saveVideoIdx = 0
+
+                cap = initCap()
 
         elif event == '-Hlo-':
             H_lo = int(values[event])
@@ -349,17 +425,20 @@ if __name__ == '__main__':
             
         elif event == '__TIMEOUT__':
             if cap is not None and playing:
-                readCap(cap)
+                readCap()
 
         elif event == '-img-pos-':
             if cap is not None:
                 pos = int(values['-img-pos-'])
                 print(f'再生位置:{pos}')
                 cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
-                readCap(cap)
+                readCap()
 
         elif event == '-play/pause-':
             setPlaying(not playing)
+
+        elif event == '-save-':
+            saveImgs(values['-tree-'][0])
 
         elif event == '-RedBG-':
             RedBG = window[event].get()
@@ -370,3 +449,6 @@ if __name__ == '__main__':
             print('You entered ', event)
 
     window.close()
+
+    if csvFile is not None:
+        csvFile.close()
