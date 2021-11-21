@@ -41,13 +41,10 @@ def initCap():
 
     video_path = saveVideoPathes[saveVideoIdx]
 
-    for img_path in glob.glob('tmp/*.png'):
-        print(img_path)
-        os.remove(img_path)
-
     cap = cv2.VideoCapture(video_path)    
 
     if not cap.isOpened():
+        print("動画再生エラー")
         sys.exit()
 
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -202,11 +199,13 @@ def showVideo(frame):
     xmin, ymin, xmax, ymax = ( dx + x, dy + y, dx + x + w, dy + y + h )
 
     pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
-    test_img_path = os.path.join(test_img_dir, f'{saveVideoIdx}-{pos}.png')         
+    test_img_path = f'{output_dir}/img/{saveVideoIdx}-{pos}.png'
     cv2.imwrite(test_img_path, compo_img)
 
     file_name = os.path.basename(test_img_path)
-    csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax}\n')
+
+    if csvFile is not None:
+        csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax}\n')
 
     # 矩形を描く。
     cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
@@ -233,11 +232,13 @@ def get_tree_data(video_dir):
         category_name = os.path.basename(category_path)
 
         treedata.Insert('', category_path, category_name, values=[])
+        print(f'category:{category_name} {str(category_path)}')
 
         for video_path in glob.glob(f'{category_path}/*'):
             video_name = os.path.basename(video_path)
 
             video_path_str = str(video_path)
+            print(f'video:{video_path_str}')
             treedata.Insert(category_path, video_path_str, video_name, values=[video_path_str])
 
             video_pathes.append(video_path_str)
@@ -302,7 +303,11 @@ def saveImgs(save_video_dir):
     saveVideoPathes = [ x for x in glob.glob(f'{save_video_dir}/*') if x in video_pathes]
     saveVideoIdx = 0
 
-    csvFile = open('test.csv', 'w')
+    for img_path in glob.glob('{output_dir}/img/*.png'):
+        print(f'削除:{img_path}')
+        os.remove(img_path)
+
+    csvFile = open(f'{output_dir}/target.csv', 'w')
     csvFile.write('image,xmin,ymin,xmax,ymax\n')
 
     cap = initCap()
@@ -327,9 +332,10 @@ if __name__ == '__main__':
     video_dir = sys.argv[1]
     bg_img_dir = sys.argv[2]
 
-    test_img_dir = sys.argv[3]
-    print(f'変換先:{test_img_dir}')
-    os.makedirs(test_img_dir, exist_ok=True)
+    output_dir = sys.argv[3]
+    print(f'変換先:{output_dir}')
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(f'{output_dir}/img', exist_ok=True)
 
 
     bgImgPaths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
@@ -367,7 +373,7 @@ if __name__ == '__main__':
         spin('V lo', V_lo, '-Vlo-') + spin('V hi', V_hi, '-Vhi-') + [ sg.Image(filename='', key='-Vbar-') ],
         [sg.Text('Some text on Row 1')],
         [sg.Text('Enter something on Row 2'), sg.InputText()],
-        [ sg.Button('Play', key='-play/pause-'), sg.Button('Save', key='-save-'), sg.Button('Cancel')] ]
+        [ sg.Button('Play', key='-play/pause-'), sg.Button('Save', key='-save-'), sg.Button('Close')] ]
 
     # Create the Window
     window = sg.Window('Window Title', layout)
@@ -388,11 +394,11 @@ if __name__ == '__main__':
             is_first = False
             colorBar()
 
-        if event == sg.WIN_CLOSED or event == 'Cancel': # if user closes window or clicks cancel
+        if event == sg.WIN_CLOSED or event == 'Close': # if user closes window or clicks cancel
             break
 
         if event == '-tree-':
-            print(values[event])
+            print(f'クリック {values[event]}')
             video_path = values[event][0]
             if video_path in video_pathes:
 
@@ -403,6 +409,9 @@ if __name__ == '__main__':
                 saveVideoIdx = 0
 
                 cap = initCap()
+
+            else:
+                print(f'パスが不正 {video_path}')
 
         elif event == '-Hlo-':
             H_lo = int(values[event])
