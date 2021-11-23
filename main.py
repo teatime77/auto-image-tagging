@@ -16,12 +16,20 @@ playing = False
 RedBG=False
 csvFile = None
 
+classIdx = 0
+imageClasses = []
+
 H_lo =  90
 H_hi = 180
 S_lo =   0
 S_hi = 255
 V_lo =   0
 V_hi = 255
+
+class ImageClass:
+    def __init__(self, name):
+        self.name = name
+        self.videoPathes = []
 
 def printing(position):
     global H_lo, H_hi, S_lo, S_hi, V_lo, V_hi
@@ -37,9 +45,9 @@ def printing(position):
 
 
 def initCap():
-    global saveVideoPathes, saveVideoIdx
+    global saveVideoIdx
 
-    video_path = saveVideoPathes[saveVideoIdx]
+    video_path = imageClasses[classIdx].videoPathes[saveVideoIdx]
 
     cap = cv2.VideoCapture(video_path)    
 
@@ -50,7 +58,7 @@ def initCap():
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     window['-img-pos-'].update(range=(0, frame_count))
     window['-img-pos-'].update(value=0)
-    print(f'再生開始 フレーム数:{cap.get(cv2.CAP_PROP_FRAME_COUNT)}')
+    print(f'再生開始 フレーム数:{cap.get(cv2.CAP_PROP_FRAME_COUNT)} {os.path.basename(video_path)}')
 
     setPlaying(True)
 
@@ -71,7 +79,7 @@ def showImg(key, img):
     window[key].update(data=image_tk, size=(256,256))
 
 def readCap():
-    global cap, saveVideoPathes, saveVideoIdx, csvFile
+    global cap, saveVideoIdx, csvFile, classIdx
 
     ret, frame = cap.read()
     if ret:
@@ -86,18 +94,26 @@ def readCap():
 
         saveVideoIdx += 1
 
-        if saveVideoIdx < len(saveVideoPathes):
+        if saveVideoIdx < len(imageClasses[classIdx].videoPathes):
             cap.release()
 
             cap = initCap()
         else:
 
-            if csvFile is not None:
-                csvFile.close()
-                csvFile = None
+            classIdx += 1
 
-            setPlaying(False)
-            # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            if classIdx < len(imageClasses):
+                cap.release()
+
+                cap = initCap()
+
+            else:
+                if csvFile is not None:
+                    csvFile.close()
+                    csvFile = None
+
+                setPlaying(False)
+                # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         
 def diffHue(hue):
     if hue < H_lo:
@@ -199,13 +215,13 @@ def showVideo(frame):
     xmin, ymin, xmax, ymax = ( dx + x, dy + y, dx + x + w, dy + y + h )
 
     pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
-    test_img_path = f'{output_dir}/img/{saveVideoIdx}-{pos}.png'
+    test_img_path = f'{output_dir}/img/{classIdx}-{saveVideoIdx}-{pos}.png'
     cv2.imwrite(test_img_path, compo_img)
 
     file_name = os.path.basename(test_img_path)
 
     if csvFile is not None:
-        csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax}\n')
+        csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax},{classIdx+1}\n')
 
     # 矩形を描く。
     cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
@@ -222,14 +238,18 @@ def showVideo(frame):
     showImg('-image12-', diff_img)
 
 def get_tree_data(video_dir):
-    global video_pathes
+    global video_pathes, imageClasses
 
     video_pathes = []
+    imageClasses = []
 
     treedata = sg.TreeData()
 
     for category_path in glob.glob(f'{video_dir}/*'):
         category_name = os.path.basename(category_path)
+
+        img_class = ImageClass(category_name)
+        imageClasses.append(img_class)
 
         treedata.Insert('', category_path, category_name, values=[])
         print(f'category:{category_name} {str(category_path)}')
@@ -238,9 +258,11 @@ def get_tree_data(video_dir):
             video_name = os.path.basename(video_path)
 
             video_path_str = str(video_path)
-            print(f'video:{video_path_str}')
+            print(f'video:{video_path_str}')        
+
             treedata.Insert(category_path, video_path_str, video_name, values=[video_path_str])
 
+            img_class.videoPathes.append(video_path_str)
             video_pathes.append(video_path_str)
 
     return treedata
@@ -297,18 +319,18 @@ def setPlaying(is_playing):
         window['-play/pause-'].update(text='Play')
         print('show play')
 
-def saveImgs(save_video_dir):
-    global cap, saveVideoPathes, saveVideoIdx, csvFile
+def saveImgs():
+    global cap, saveVideoIdx, csvFile, classIdx
 
-    saveVideoPathes = [ x for x in glob.glob(f'{save_video_dir}/*') if x in video_pathes]
+    classIdx = 0;
     saveVideoIdx = 0
 
-    for img_path in glob.glob('{output_dir}/img/*.png'):
+    for img_path in glob.glob(f'{output_dir}/img/*.png'):
         print(f'削除:{img_path}')
         os.remove(img_path)
 
     csvFile = open(f'{output_dir}/target.csv', 'w')
-    csvFile.write('image,xmin,ymin,xmax,ymax\n')
+    csvFile.write('image,xmin,ymin,xmax,ymax,label\n')
 
     cap = initCap()
 
@@ -405,13 +427,14 @@ if __name__ == '__main__':
                 if cap is not None:
                     cap.release()
 
-                saveVideoPathes = [ video_path ]
-                saveVideoIdx = 0
+                v = [ (i, c) for i, c in enumerate(imageClasses) if video_path in c.videoPathes ]
+                assert len(v) == 1
+
+                classIdx = v[0][0]
+                img_class = v[0][1]
+                saveVideoIdx = img_class.videoPathes.index(video_path)
 
                 cap = initCap()
-
-            else:
-                print(f'パスが不正 {video_path}')
 
         elif event == '-Hlo-':
             H_lo = int(values[event])
@@ -447,7 +470,7 @@ if __name__ == '__main__':
             setPlaying(not playing)
 
         elif event == '-save-':
-            saveImgs(values['-tree-'][0])
+            saveImgs()
 
         elif event == '-RedBG-':
             RedBG = window[event].get()
