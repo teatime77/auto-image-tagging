@@ -8,13 +8,17 @@ from operator import itemgetter
 import PySimpleGUI as sg
 from PIL import Image, ImageTk
 import random
-
+import time
 
 window_name = 'frame'
 bin_name = 'bin'
 playing = False
 RedBG=False
+saveAll = False
+isSaving = False
 csvFile = None
+multipleIdx = 0
+framePrev = None
 
 classIdx = 0
 imageClasses = []
@@ -27,8 +31,9 @@ V_lo =   0
 V_hi = 255
 
 class ImageClass:
-    def __init__(self, name):
+    def __init__(self, name, class_dir):
         self.name = name
+        self.classDir = class_dir
         self.videoPathes = []
 
 def printing(position):
@@ -79,7 +84,11 @@ def showImg(key, img):
     window[key].update(data=image_tk, size=(256,256))
 
 def readCap():
-    global cap, saveVideoIdx, csvFile, classIdx
+    global cap, saveVideoIdx, csvFile, classIdx, framePrev
+
+    if isSaving and multipleIdx != 0:
+        showVideo(framePrev)
+        return
 
     ret, frame = cap.read()
     if ret:
@@ -89,6 +98,7 @@ def readCap():
         window['-img-pos-'].update(value=pos)
 
         showVideo(frame)
+        framePrev = frame
 
     else:
 
@@ -102,7 +112,7 @@ def readCap():
 
             classIdx += 1
 
-            if classIdx < len(imageClasses):
+            if saveAll and classIdx < len(imageClasses):
                 cap.release()
 
                 cap = initCap()
@@ -124,14 +134,14 @@ def diffHue(hue):
         return 90
 
 def showVideo(frame):
-    global bgImgPaths, bgImgIdx
+    global bgImgPaths, bgImgIdx, multipleIdx
     
     # BGRからHSVに変換する。
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
     # HSVの範囲を0と255に2値化する。
-    bin_img = cv2.inRange(hsv, (H_lo, S_lo, V_lo), (H_hi, S_hi, V_hi))
-    assert(bin_img.shape == hsv.shape[:2])
+    bin_img = cv2.inRange(img_hsv, (H_lo, S_lo, V_lo), (H_hi, S_hi, V_hi))
+    assert(bin_img.shape == img_hsv.shape[:2])
 
     # 二値化画像から輪郭のリストを得る。
     contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)   # RETR_EXTERNAL RETR_TREE
@@ -164,6 +174,10 @@ def showVideo(frame):
     edge_img = np.zeros(frame.shape, dtype=np.uint8)
     cv2.drawContours(edge_img, [ contour ], -1, (1,1,1), 5)
 
+
+
+    # img_hsv[:,:,(1)] = img_hsv[:,:,(1)]*s_magnification
+
     # 元画像から
     dst_img = frame * mask_img
 
@@ -192,10 +206,10 @@ def showVideo(frame):
     ])
 
     # 画像に変換行列を作用させる。
-    dst_img = cv2.warpAffine(dst_img, M, (cols, rows))
+    dst_img2 = cv2.warpAffine(dst_img, M, (cols, rows))
     warp_img = cv2.warpAffine(frame, M, (cols, rows))
-    mask_img = cv2.warpAffine(mask_img, M, (cols, rows))
-    edge_img = cv2.warpAffine(edge_img, M, (cols, rows))
+    mask_img2 = cv2.warpAffine(mask_img, M, (cols, rows))
+    edge_img2 = cv2.warpAffine(edge_img, M, (cols, rows))
 
     # 背景画像ファイルを読む。
     bg_img = cv2.imread(bgImgPaths[bgImgIdx])
@@ -205,17 +219,17 @@ def showVideo(frame):
     bg_img = cv2.resize(bg_img, dsize=frame.shape[:2])                    
 
     # 内部のマスクを使って、背景画像と元画像を合成する。
-    compo_img = np.where(mask_img == 0, bg_img, warp_img)
+    compo_img = np.where(mask_img2 == 0, bg_img, warp_img)
 
     # 縁のマスクを使って、背景画像と元画像を合成する。
     blend_img = cv2.addWeighted(bg_img, 0.7, warp_img, 0.3, 0.0)
-    compo_img = np.where(edge_img == 0, compo_img, blend_img)
+    compo_img = np.where(edge_img2 == 0, compo_img, blend_img)
 
     # 矩形の左上と右下の座標
     xmin, ymin, xmax, ymax = ( dx + x, dy + y, dx + x + w, dy + y + h )
 
     pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
-    test_img_path = f'{output_dir}/img/{classIdx}-{saveVideoIdx}-{pos}.png'
+    test_img_path = f'{output_dir}/img/{classIdx}-{saveVideoIdx}-{pos}-{multipleIdx}.png'
     cv2.imwrite(test_img_path, compo_img)
 
     file_name = os.path.basename(test_img_path)
@@ -226,16 +240,23 @@ def showVideo(frame):
     # 矩形を描く。
     cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
 
-    showImg('-image11-', dst_img)
-    showImg('-image21-', compo_img)
+    showImg('-image11-', frame)
+    showImg('-image21-', dst_img2)
+    showImg('-image22-', compo_img)
 
     # Hueを取り出す。
-    hue = hsv[:, :, 0]
+    hue = img_hsv[:, :, 0]
 
     # Hueの指定範囲からの差をグレースケールで表示する。
     diff_img = np.where(hue < H_lo, 90 + hue - H_lo, np.where(H_hi < hue, 90 + hue - H_hi, 90))
 
     showImg('-image12-', diff_img)
+
+
+    multiple = int(values['-multiple-'])
+    multipleIdx = (multipleIdx + 1) % multiple
+
+    # time.sleep(1)
 
 def get_tree_data(video_dir):
     global video_pathes, imageClasses
@@ -245,22 +266,22 @@ def get_tree_data(video_dir):
 
     treedata = sg.TreeData()
 
-    for category_path in glob.glob(f'{video_dir}/*'):
-        category_name = os.path.basename(category_path)
+    for class_dir in glob.glob(f'{video_dir}/*'):
+        category_name = os.path.basename(class_dir)
 
-        img_class = ImageClass(category_name)
+        img_class = ImageClass(category_name, class_dir)
         imageClasses.append(img_class)
 
-        treedata.Insert('', category_path, category_name, values=[])
-        print(f'category:{category_name} {str(category_path)}')
+        treedata.Insert('', class_dir, category_name, values=[])
+        print(f'category:{category_name} {str(class_dir)}')
 
-        for video_path in glob.glob(f'{category_path}/*'):
+        for video_path in glob.glob(f'{class_dir}/*'):
             video_name = os.path.basename(video_path)
 
             video_path_str = str(video_path)
             print(f'video:{video_path_str}')        
 
-            treedata.Insert(category_path, video_path_str, video_name, values=[video_path_str])
+            treedata.Insert(class_dir, video_path_str, video_name, values=[video_path_str])
 
             img_class.videoPathes.append(video_path_str)
             video_pathes.append(video_path_str)
@@ -297,15 +318,10 @@ def colorBar():
         hbar_img = ImageTk.PhotoImage(image=img_pil)
         window[f'-{HSV}bar-'].update(data=hbar_img)
      
-def spin(label, val, key):
-    if label[0] == 'H':
-        max_val = 180
-    else:
-        max_val = 255
-
+def spin(label, key, val, min_val, max_val):
     return [ 
         sg.Text(label, size=(6,1)), sg.Text("", size=(6,1)), 
-        sg.Spin(list(range(0, max_val + 1)), initial_value=val, size=(10, 1), key=key, enable_events=True )
+        sg.Spin(list(range(min_val, max_val + 1)), initial_value=val, size=(10, 1), key=key, enable_events=True )
     ]
 
 def setPlaying(is_playing):
@@ -322,7 +338,6 @@ def setPlaying(is_playing):
 def saveImgs():
     global cap, saveVideoIdx, csvFile, classIdx
 
-    classIdx = 0;
     saveVideoIdx = 0
 
     for img_path in glob.glob(f'{output_dir}/img/*.png'):
@@ -380,7 +395,6 @@ if __name__ == '__main__':
                 enable_events=True),
             sg.Column([
                 [ sg.Image(filename='', size=(256,256), key='-image11-') ],
-                [ sg.Slider(range=(0,100), default_value=0, size=(100,15), orientation='horizontal', change_submits=True, key='-img-pos-') ],
                 [ sg.Image(filename='', size=(256,256), key='-image21-') ]
             ])
             ,
@@ -388,14 +402,16 @@ if __name__ == '__main__':
                 [ sg.Image(filename='', size=(256,256), key='-image12-') ],
                 [ sg.Image(filename='', size=(256,256), key='-image22-') ]
             ])
-                    
-        ],
-        spin('H lo', H_lo, '-Hlo-') + spin('H hi', H_hi, '-Hhi-') + [ sg.Image(filename='', key='-Hbar-'), sg.Checkbox('赤背景', default=RedBG, key='-RedBG-', enable_events=True) ],
-        spin('S lo', S_lo, '-Slo-') + spin('S hi', S_hi, '-Shi-') + [ sg.Image(filename='', key='-Sbar-') ],
-        spin('V lo', V_lo, '-Vlo-') + spin('V hi', V_hi, '-Vhi-') + [ sg.Image(filename='', key='-Vbar-') ],
-        [sg.Text('Some text on Row 1')],
+        ]
+        ,
+        [ sg.Slider(range=(0,100), default_value=0, size=(100,15), orientation='horizontal', change_submits=True, key='-img-pos-') ]
+        ,
+        spin('H lo', '-Hlo-', H_lo, 0, 180) + spin('H hi', '-Hhi-', H_hi, 0, 180) + [ sg.Image(filename='', key='-Hbar-'), sg.Checkbox('赤背景', default=RedBG, key='-RedBG-', enable_events=True) ],
+        spin('S lo', '-Slo-', S_lo, 0, 255) + spin('S hi', '-Shi-', S_hi, 0, 255) + [ sg.Image(filename='', key='-Sbar-') ],
+        spin('V lo', '-Vlo-', V_lo, 0, 255) + spin('V hi', '-Vhi-', V_hi, 0, 255) + [ sg.Image(filename='', key='-Vbar-') ],
+        spin('倍数', '-multiple-', 1, 1, 10),
         [sg.Text('Enter something on Row 2'), sg.InputText()],
-        [ sg.Button('Play', key='-play/pause-'), sg.Button('Save', key='-save-'), sg.Button('Close')] ]
+        [ sg.Button('Play', key='-play/pause-'), sg.Button('Save', key='-save-'), sg.Button('Save All', key='-save-all-'), sg.Button('Close')] ]
 
     # Create the Window
     window = sg.Window('Window Title', layout)
@@ -420,7 +436,7 @@ if __name__ == '__main__':
             break
 
         if event == '-tree-':
-            print(f'クリック {values[event]}')
+            print(f'クリック [{values[event]}] [{values[event][0]}]')
             video_path = values[event][0]
             if video_path in video_pathes:
 
@@ -470,6 +486,24 @@ if __name__ == '__main__':
             setPlaying(not playing)
 
         elif event == '-save-':
+            class_dir = values['-tree-'][0]
+            print("save video dir", class_dir)
+            v = [ (i, c) for i, c in enumerate(imageClasses) if class_dir == c.classDir ]
+            assert len(v) == 1
+
+            classIdx = v[0][0]
+            saveAll = False
+            isSaving = True
+            multipleIdx = 0
+            multipleIdx = 0
+
+            saveImgs()
+
+        elif event == '-save-all-':
+            classIdx = 0;
+            saveAll = True
+            isSaving = True
+
             saveImgs()
 
         elif event == '-RedBG-':
