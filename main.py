@@ -23,12 +23,15 @@ framePrev = None
 classIdx = 0
 imageClasses = []
 
-H_lo =  90
-H_hi = 180
+H_lo =  80
+H_hi = 140
 S_lo =   0
 S_hi = 255
 V_lo =   0
 V_hi = 255
+
+S_mag =  100
+V_mag =  100
 
 class ImageClass:
     def __init__(self, name, class_dir):
@@ -174,30 +177,44 @@ def showVideo(frame):
     edge_img = np.zeros(frame.shape, dtype=np.uint8)
     cv2.drawContours(edge_img, [ contour ], -1, (1,1,1), 5)
 
+    # コントラストと輝度を変える。
+    img_hsv2 = np.copy(img_hsv)
 
+    if True or isSaving:
+        s_mag = random.uniform(0.5, 1.0)
+        v_mag = random.uniform(0.5, 1.0)
+    else:
+        s_mag = float(S_mag) / 100.0
+        v_mag = float(V_mag) / 100.0
 
-    # img_hsv[:,:,(1)] = img_hsv[:,:,(1)]*s_magnification
+    img_hsv2[:,:,(1)] = img_hsv2[:,:,(1)] * s_mag
+    img_hsv2[:,:,(2)] = img_hsv2[:,:,(2)] * v_mag
+
+    frame2 = cv2.cvtColor(img_hsv2, cv2.COLOR_HSV2BGR)
 
     # 元画像から
-    dst_img = frame * mask_img
+    dst_img = frame2 * mask_img
 
     x, y, w, h = cv2.boundingRect(contour)
 
 
     # rect_img = np.zeros(frame.shape, dtype=np.uint8)
-    cv2.rectangle(dst_img, (x, y), (x+w, y+h), (0, 255, 0), 3)    
+    # cv2.rectangle(dst_img, (x, y), (x+w, y+h), (0, 255, 0), 3)    
 
     rows, cols = frame.shape[:2]
 
     # 乱数でスケールを決める。
-    scale = random.uniform(0.5, 1)
+    max_scale = (0.3 * 720.0) / float(max(w, h))
+    min_scale = 0.7 * max_scale
+    scale = random.uniform(min_scale, max_scale)
 
     # スケール変換する。
-    x, y, w, h =[ round(scale * x) for x in (x, y, w, h)]
+    x, y, w, h =[ round(scale * c) for c in (x, y, w, h)]
     
     # 乱数で移動量を決める。
-    dx = random.randint(-x, cols - (x + w))
-    dy = random.randint(-y, rows - (y + h))
+    mg = abs(w - h)
+    dx = random.randint(-x + mg, cols - (x + w) - mg)
+    dy = random.randint(-y + mg, rows - (y + h) - mg)
 
     # スケールと平行移動の変換行列
     M = np.float32([
@@ -205,9 +222,23 @@ def showVideo(frame):
         [    0, scale, dy]
     ])
 
+    center = (x + 0.5 * w, y + 0.5 * h)
+    angle = random.uniform(0.0, 360.0)
+    m1 = cv2.getRotationMatrix2D(center, angle , scale)
+    m1 = np.concatenate((m1, np.array([[0.0, 0.0, 1.0]])))
+
+    m2 = np.array([
+        [ 1, 0, dx], 
+        [ 0, 1, dy], 
+        [ 0, 0,  1]
+    ], dtype=np.float32)
+
+    m3 = np.dot(m2, m1)
+    M = m3[:2,:]
+
     # 画像に変換行列を作用させる。
     dst_img2 = cv2.warpAffine(dst_img, M, (cols, rows))
-    warp_img = cv2.warpAffine(frame, M, (cols, rows))
+    warp_img = cv2.warpAffine(frame2, M, (cols, rows))
     mask_img2 = cv2.warpAffine(mask_img, M, (cols, rows))
     edge_img2 = cv2.warpAffine(edge_img, M, (cols, rows))
 
@@ -225,8 +256,11 @@ def showVideo(frame):
     blend_img = cv2.addWeighted(bg_img, 0.7, warp_img, 0.3, 0.0)
     compo_img = np.where(edge_img2 == 0, compo_img, blend_img)
 
+    mask_img3 = cv2.cvtColor(mask_img2, cv2.COLOR_BGR2GRAY).astype(np.uint8)
+    x1, y1, w1, h1 = cv2.boundingRect(mask_img3)
+
     # 矩形の左上と右下の座標
-    xmin, ymin, xmax, ymax = ( dx + x, dy + y, dx + x + w, dy + y + h )
+    xmin, ymin, xmax, ymax = ( x1, y1, x1 + w1, y1 + h1 )
 
     pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
     test_img_path = f'{output_dir}/img/{classIdx}-{saveVideoIdx}-{pos}-{multipleIdx}.png'
@@ -238,6 +272,7 @@ def showVideo(frame):
         csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax},{classIdx+1}\n')
 
     # 矩形を描く。
+    cv2.rectangle(dst_img2 , (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
     cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
 
     showImg('-image11-', frame)
@@ -349,6 +384,13 @@ def saveImgs():
 
     cap = initCap()
 
+def showImgPos():
+    if cap is not None:
+        pos = int(values['-img-pos-'])
+        print(f'再生位置:{pos}')
+        cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+        readCap()
+
 if __name__ == '__main__':
     print(cv2.getBuildInformation())
 
@@ -409,7 +451,7 @@ if __name__ == '__main__':
         spin('H lo', '-Hlo-', H_lo, 0, 180) + spin('H hi', '-Hhi-', H_hi, 0, 180) + [ sg.Image(filename='', key='-Hbar-'), sg.Checkbox('赤背景', default=RedBG, key='-RedBG-', enable_events=True) ],
         spin('S lo', '-Slo-', S_lo, 0, 255) + spin('S hi', '-Shi-', S_hi, 0, 255) + [ sg.Image(filename='', key='-Sbar-') ],
         spin('V lo', '-Vlo-', V_lo, 0, 255) + spin('V hi', '-Vhi-', V_hi, 0, 255) + [ sg.Image(filename='', key='-Vbar-') ],
-        spin('倍数', '-multiple-', 1, 1, 10),
+        spin('倍数', '-multiple-', 1, 1, 10) + spin('S mag', '-S_mag-', 100, 10, 200) + spin('V mag', '-V_mag-', 100, 10, 200),
         [sg.Text('Enter something on Row 2'), sg.InputText()],
         [ sg.Button('Play', key='-play/pause-'), sg.Button('Save', key='-save-'), sg.Button('Save All', key='-save-all-'), sg.Button('Close')] ]
 
@@ -470,17 +512,21 @@ if __name__ == '__main__':
         elif event == '-Vhi-':
             V_hi = int(values[event])
             colorBar()
-            
+
+        elif event == '-S_mag-':
+            S_mag = int(values[event])
+            showImgPos()
+
+        elif event == '-V_mag-':
+            V_mag = int(values[event])
+            showImgPos()
+
         elif event == '__TIMEOUT__':
             if cap is not None and playing:
                 readCap()
 
         elif event == '-img-pos-':
-            if cap is not None:
-                pos = int(values['-img-pos-'])
-                print(f'再生位置:{pos}')
-                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
-                readCap()
+            showImgPos()
 
         elif event == '-play/pause-':
             setPlaying(not playing)
