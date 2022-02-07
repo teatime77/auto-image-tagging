@@ -27,7 +27,7 @@ H_lo =  80
 H_hi = 140
 S_lo =   0
 S_hi = 255
-V_lo =   0
+V_lo = 240
 V_hi = 255
 
 S_mag =  100
@@ -136,18 +136,75 @@ def diffHue(hue):
     else:
         return 90
 
+keys = [ '-image21-', '-image22-', '-image23-', '-image31-', '-image32-' ]
+
+def showContours(frame, bin_img, contours, hierarchy, idx, nest, key_idx):
+    cont = contours[idx]
+
+    img_area = bin_img.shape[0] * bin_img.shape[1]
+    area = cv2.contourArea(cont)
+    ratio = 100 * np.sqrt(area) / np.sqrt(img_area)
+
+
+
+    if key_idx < len(keys) and 40 < ratio:
+        pass
+    else:
+        return key_idx
+
+    M = cv2.moments(cont)
+    cx = int(M['m10']/M['m00'])
+    cy = int(M['m01']/M['m00'])
+
+    rx = int(100 * cx / bin_img.shape[0])
+    ry = int(100 * cy / bin_img.shape[1])
+
+    if 35 <= rx and rx <= 65 and 35 <= ry and ry <= 65:
+        c = 255
+    else:
+        c = 128
+
+    mask_img = np.zeros(bin_img.shape, dtype=np.uint8)
+    cv2.drawContours(mask_img, contours, idx, c, -1)
+
+    cmp_img = np.minimum(bin_img, mask_img)
+
+    showImg(keys[key_idx], cmp_img)
+    key_idx += 1
+
+    print("%s %d [%d, %d, %d, %d] area:%.1f c(%d, %d)" % (' ' * (nest * 4), idx, hierarchy[0][idx][0], hierarchy[0][idx][1], hierarchy[0][idx][2], hierarchy[0][idx][3], ratio, rx, ry))
+
+    # if hierarchy[0][idx][2] != -1:
+    #     key_idx = showContours(cmp_img, contours, hierarchy, hierarchy[0][idx][2], nest + 1, key_idx)
+
+    # if hierarchy[0][idx][1] != -1:
+    #     key_idx = showContours(bin_img, contours, hierarchy, hierarchy[0][idx][1], nest, key_idx)
+
+    if c == 255:
+        img2 = cv2.cvtColor(cmp_img, cv2.COLOR_GRAY2BGR) 
+        img3 = np.minimum(img2, frame)
+
+        # img2 = frame[cmp_img != 0]
+        showImg('-image33-', img3)
+
+    return key_idx
+
 def showVideo(frame):
     global bgImgPaths, bgImgIdx, multipleIdx
-    
-    # BGRからHSVに変換する。
-    img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    # HSVの範囲を0と255に2値化する。
-    bin_img = cv2.inRange(img_hsv, (H_lo, S_lo, V_lo), (H_hi, S_hi, V_hi))
-    assert(bin_img.shape == img_hsv.shape[:2])
+    showImg('-image11-', frame)
+
+    gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+
+    showImg('-image12-', gray_img)
+
+
+    bin_img = 255 - cv2.inRange(gray_img, V_lo, V_hi)
+    showImg('-image13-', bin_img)
+
 
     # 二値化画像から輪郭のリストを得る。
-    contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)   # RETR_EXTERNAL RETR_TREE
+    contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)   #   RETR_CCOMP RETR_TREE
 
     # 輪郭と面積の対のリスト
     contour_areas = [ (x, cv2.contourArea(x)) for x in contours ]
@@ -161,9 +218,29 @@ def showVideo(frame):
     # 面積の平方根が元画像の10%以上で70%未満の輪郭を抽出する。
     contour_areas_ratio = [ x for x in contour_areas_ratio if 10 <= x[1] and x[1] < 70 ]
 
-    if len(contour_areas_ratio) != 1:
-        # 条件を満たす輪郭が1つでない場合
+    # if len(contour_areas_ratio) != 1:
+    #     # 条件を満たす輪郭が1つでない場合
 
+    #     return
+
+    assert(len(hierarchy.shape) == 3 and hierarchy.shape[0] == 1 and hierarchy.shape[2] == 4)
+    assert(len(contours) == hierarchy.shape[1])
+
+    print('-' * 50)
+    key_idx = 0
+    mask_img = np.zeros(bin_img.shape, dtype=np.uint8)
+    for idx, _ in enumerate(contours):
+        if hierarchy[0][idx][3] == -1:
+            key_idx = showContours(frame, bin_img, contours, hierarchy, idx, 0, key_idx)
+
+
+    while key_idx < len(keys):
+        img = np.zeros(frame.shape, dtype=np.uint8)
+        showImg(keys[key_idx], img)
+
+        key_idx += 1
+        
+    if frame is not None:
         return
 
     # 対象の輪郭      
@@ -178,14 +255,11 @@ def showVideo(frame):
     cv2.drawContours(edge_img, [ contour ], -1, (1,1,1), 5)
 
     # コントラストと輝度を変える。
+    img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
     img_hsv2 = np.copy(img_hsv)
 
-    if True or isSaving:
-        s_mag = random.uniform(0.5, 1.0)
-        v_mag = random.uniform(0.5, 1.0)
-    else:
-        s_mag = float(S_mag) / 100.0
-        v_mag = float(V_mag) / 100.0
+    s_mag = random.uniform(0.5, 1.0)
+    v_mag = random.uniform(0.5, 1.0)
 
     img_hsv2[:,:,(1)] = img_hsv2[:,:,(1)] * s_mag
     img_hsv2[:,:,(2)] = img_hsv2[:,:,(2)] * v_mag
@@ -196,10 +270,6 @@ def showVideo(frame):
     dst_img = frame2 * mask_img
 
     x, y, w, h = cv2.boundingRect(contour)
-
-
-    # rect_img = np.zeros(frame.shape, dtype=np.uint8)
-    # cv2.rectangle(dst_img, (x, y), (x+w, y+h), (0, 255, 0), 3)    
 
     rows, cols = frame.shape[:2]
 
@@ -275,7 +345,6 @@ def showVideo(frame):
     cv2.rectangle(dst_img2 , (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
     cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
 
-    showImg('-image11-', frame)
     showImg('-image21-', dst_img2)
     showImg('-image22-', compo_img)
 
@@ -437,12 +506,20 @@ if __name__ == '__main__':
                 enable_events=True),
             sg.Column([
                 [ sg.Image(filename='', size=(256,256), key='-image11-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image21-') ]
+                [ sg.Image(filename='', size=(256,256), key='-image21-') ],
+                [ sg.Image(filename='', size=(256,256), key='-image31-') ]
             ])
             ,
             sg.Column([
                 [ sg.Image(filename='', size=(256,256), key='-image12-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image22-') ]
+                [ sg.Image(filename='', size=(256,256), key='-image22-') ],
+                [ sg.Image(filename='', size=(256,256), key='-image32-') ]
+            ])
+            ,
+            sg.Column([
+                [ sg.Image(filename='', size=(256,256), key='-image13-') ],
+                [ sg.Image(filename='', size=(256,256), key='-image23-') ],
+                [ sg.Image(filename='', size=(256,256), key='-image33-') ]
             ])
         ]
         ,
