@@ -10,6 +10,9 @@ from PIL import Image, ImageTk
 import random
 import time
 
+Next_Sibling, Previous_Sibling, First_Child, Parent = (0, 1, 2, 3)
+
+
 window_name = 'frame'
 bin_name = 'bin'
 playing = False
@@ -136,123 +139,136 @@ def diffHue(hue):
     else:
         return 90
 
-keys = [ '-image21-', '-image22-', '-image23-', '-image31-', '-image32-' ]
+def useHSV(img_hsv):
 
-def showContours(frame, bin_img, contours, hierarchy, idx, nest, key_idx):
-    cont = contours[idx]
+    # Hueを取り出す。
+    hue = img_hsv[:, :, 0]
+
+    # Hueの指定範囲からの差をグレースケールで表示する。
+    diff_img = np.where(hue < H_lo, 90 + hue - H_lo, np.where(H_hi < hue, 90 + hue - H_hi, 90))
+
+rotAngle = 0
+
+def showContours(frame, bin_img, contours, hierarchy, idx, nest):
+    global rotAngle
+
+    contour = contours[idx]
 
     img_area = bin_img.shape[0] * bin_img.shape[1]
-    area = cv2.contourArea(cont)
+    area = cv2.contourArea(contour)
     ratio = 100 * np.sqrt(area) / np.sqrt(img_area)
 
+    if ratio < 40:
+        return None, None, None
 
-
-    if key_idx < len(keys) and 40 < ratio:
-        pass
-    else:
-        return key_idx
-
-    M = cv2.moments(cont)
+    M = cv2.moments(contour)
     cx = int(M['m10']/M['m00'])
     cy = int(M['m01']/M['m00'])
 
-    rx = int(100 * cx / bin_img.shape[0])
-    ry = int(100 * cy / bin_img.shape[1])
+    width  = bin_img.shape[0]
+    height  = bin_img.shape[1]
+    rx = int(100 * cx / width)
+    ry = int(100 * cy / height)
 
     if 35 <= rx and rx <= 65 and 35 <= ry and ry <= 65:
-        c = 255
+        pass
     else:
-        c = 128
+        print("%s %d [%d, %d, %d, %d] area:%.1f c(%d, %d)" % (' ' * (nest * 4), idx, hierarchy[0][idx][Next_Sibling], hierarchy[0][idx][Previous_Sibling], hierarchy[0][idx][First_Child], hierarchy[0][idx][Parent], ratio, rx, ry))
+        return None, None, None
 
-    mask_img = np.zeros(bin_img.shape, dtype=np.uint8)
-    cv2.drawContours(mask_img, contours, idx, c, -1)
+    # showImg('-image21-', cmp_img)
 
-    cmp_img = np.minimum(bin_img, mask_img)
+    conts = [ contour ]
 
-    showImg(keys[key_idx], cmp_img)
-    key_idx += 1
+    # 最初の子
+    i = hierarchy[0][idx][First_Child]
+    while i != -1:
+        c = contours[i]
+        conts.append(c)
 
-    print("%s %d [%d, %d, %d, %d] area:%.1f c(%d, %d)" % (' ' * (nest * 4), idx, hierarchy[0][idx][0], hierarchy[0][idx][1], hierarchy[0][idx][2], hierarchy[0][idx][3], ratio, rx, ry))
+        # 次の兄弟
+        i = hierarchy[0][i][Next_Sibling]
 
-    # if hierarchy[0][idx][2] != -1:
-    #     key_idx = showContours(cmp_img, contours, hierarchy, hierarchy[0][idx][2], nest + 1, key_idx)
+    conts = np.array(conts)
 
-    # if hierarchy[0][idx][1] != -1:
-    #     key_idx = showContours(bin_img, contours, hierarchy, hierarchy[0][idx][1], nest, key_idx)
+    # 輪郭から0と1の二値の内部のマスク画像を作る。
+    mask_img = np.zeros(frame.shape, dtype=np.uint8)
+    cv2.drawContours(mask_img, conts, -1, (1,1,1), -1)
 
-    if c == 255:
-        img2 = cv2.cvtColor(cmp_img, cv2.COLOR_GRAY2BGR) 
-        img3 = np.minimum(img2, frame)
+    # 輪郭から0と1の二値の縁のマスク画像を作る。
+    edge_img = np.zeros(frame.shape, dtype=np.uint8)
+    cv2.drawContours(edge_img, conts, -1, (1,1,1), 5)
 
-        # img2 = frame[cmp_img != 0]
-        showImg('-image33-', img3)
+    clip_img = frame * mask_img
 
-    return key_idx
+    cv2.drawContours(clip_img, conts, -1, (255,0,0), 10)
 
+    x1, y1, w1, h1 = cv2.boundingRect(mask_img[:,:,0])
+
+    cv2.rectangle(clip_img , (x1, y1), (x1 + w1, y1 + h1), (0, 255, 0), 3)    
+
+    showImg('-image21-', clip_img)
+
+    dx = width  / 2 - cx
+    dy = height / 2 - cy
+
+    m1 = np.array([
+        [ 1, 0, dx], 
+        [ 0, 1, dy], 
+        [ 0, 0,  1]
+    ], dtype=np.float32)
+
+    body_img2 = cv2.warpAffine(clip_img, m1[:2,:], (width, height))
+    showImg('-image22-', body_img2)
+
+    center = (width / 2, height / 2)
+    rotAngle += 1
+    m2 = cv2.getRotationMatrix2D(center, rotAngle , 1)
+
+    body_img3 = cv2.warpAffine(body_img2, m2[:2,:], (width, height))
+
+    m2 = np.concatenate((m2, np.array([[0.0, 0.0, 1.0]])))
+    m3 = np.dot(m1, m2)
+    M = m3[:2,:]
+
+
+    showImg('-image23-', body_img3)
+
+    return contour, mask_img, edge_img
+ 
 def showVideo(frame):
     global bgImgPaths, bgImgIdx, multipleIdx
 
+    # 原画を表示する。
     showImg('-image11-', frame)
 
+    # グレー画像を表示する。
     gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-
     showImg('-image12-', gray_img)
 
-
+    # 二値画像を表示する。
     bin_img = 255 - cv2.inRange(gray_img, V_lo, V_hi)
     showImg('-image13-', bin_img)
 
 
     # 二値化画像から輪郭のリストを得る。
-    contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)   #   RETR_CCOMP RETR_TREE
-
-    # 輪郭と面積の対のリスト
-    contour_areas = [ (x, cv2.contourArea(x)) for x in contours ]
-
-    # 元画像の面積
-    img_area = frame.shape[0] * frame.shape[1]
-
-    # 輪郭と面積の平方根の比の対のリスト
-    contour_areas_ratio = [ (x[0], int(100 * np.sqrt(x[1]) / np.sqrt(img_area)) ) for x in contour_areas ]
-    
-    # 面積の平方根が元画像の10%以上で70%未満の輪郭を抽出する。
-    contour_areas_ratio = [ x for x in contour_areas_ratio if 10 <= x[1] and x[1] < 70 ]
-
-    # if len(contour_areas_ratio) != 1:
-    #     # 条件を満たす輪郭が1つでない場合
-
-    #     return
+    contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)   # RETR_EXTERNAL  RETR_CCOMP 
 
     assert(len(hierarchy.shape) == 3 and hierarchy.shape[0] == 1 and hierarchy.shape[2] == 4)
     assert(len(contours) == hierarchy.shape[1])
 
     print('-' * 50)
-    key_idx = 0
-    mask_img = np.zeros(bin_img.shape, dtype=np.uint8)
+    contour = None
     for idx, _ in enumerate(contours):
-        if hierarchy[0][idx][3] == -1:
-            key_idx = showContours(frame, bin_img, contours, hierarchy, idx, 0, key_idx)
+        if hierarchy[0][idx][Parent] == -1:
+            # トップレベルの場合
 
+            contour, mask_img, edge_img = showContours(frame, bin_img, contours, hierarchy, idx, 0)
+            if contour is not None:
+                break
 
-    while key_idx < len(keys):
-        img = np.zeros(frame.shape, dtype=np.uint8)
-        showImg(keys[key_idx], img)
-
-        key_idx += 1
-        
-    if frame is not None:
+    if contour is None:
         return
-
-    # 対象の輪郭      
-    contour = contour_areas_ratio[0][0]
-
-    # 輪郭から0と1の二値の内部のマスク画像を作る。
-    mask_img = np.zeros(frame.shape, dtype=np.uint8)
-    cv2.drawContours(mask_img, [ contour ], -1, (1,1,1), -1)
-
-    # 輪郭から0と1の二値の縁のマスク画像を作る。
-    edge_img = np.zeros(frame.shape, dtype=np.uint8)
-    cv2.drawContours(edge_img, [ contour ], -1, (1,1,1), 5)
 
     # コントラストと輝度を変える。
     img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
@@ -267,7 +283,7 @@ def showVideo(frame):
     frame2 = cv2.cvtColor(img_hsv2, cv2.COLOR_HSV2BGR)
 
     # 元画像から
-    dst_img = frame2 * mask_img
+    clip_img = frame2 * mask_img
 
     x, y, w, h = cv2.boundingRect(contour)
 
@@ -307,7 +323,7 @@ def showVideo(frame):
     M = m3[:2,:]
 
     # 画像に変換行列を作用させる。
-    dst_img2 = cv2.warpAffine(dst_img, M, (cols, rows))
+    dst_img2 = cv2.warpAffine(clip_img, M, (cols, rows))
     warp_img = cv2.warpAffine(frame2, M, (cols, rows))
     mask_img2 = cv2.warpAffine(mask_img, M, (cols, rows))
     edge_img2 = cv2.warpAffine(edge_img, M, (cols, rows))
@@ -345,22 +361,11 @@ def showVideo(frame):
     cv2.rectangle(dst_img2 , (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
     cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
 
-    showImg('-image21-', dst_img2)
-    showImg('-image22-', compo_img)
-
-    # Hueを取り出す。
-    hue = img_hsv[:, :, 0]
-
-    # Hueの指定範囲からの差をグレースケールで表示する。
-    diff_img = np.where(hue < H_lo, 90 + hue - H_lo, np.where(H_hi < hue, 90 + hue - H_hi, 90))
-
-    showImg('-image12-', diff_img)
-
+    showImg('-image31-', dst_img2)
+    showImg('-image32-', compo_img)
 
     multiple = int(values['-multiple-'])
     multipleIdx = (multipleIdx + 1) % multiple
-
-    # time.sleep(1)
 
 def get_tree_data(video_dir):
     global video_pathes, imageClasses
