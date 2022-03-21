@@ -1,4 +1,5 @@
 import os
+import math
 import glob
 from PySimpleGUI.PySimpleGUI import Button, Column
 import cv2
@@ -35,6 +36,12 @@ V_hi = 255
 
 S_mag =  100
 V_mag =  100
+
+dX = 0
+dY = 0
+dW = 0
+dH = 0
+dT = 0
 
 class ImageClass:
     def __init__(self, name, class_dir):
@@ -150,7 +157,7 @@ def useHSV(img_hsv):
 rotAngle = 0
 
 def showContours(frame, bin_img, contours, hierarchy, idx, nest):
-    global rotAngle
+    global rotAngle, dX, dY, dW, dH, dT
 
     contour = contours[idx]
 
@@ -189,8 +196,6 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
         # 次の兄弟
         i = hierarchy[0][i][Next_Sibling]
 
-    conts = np.array(conts)
-
     # 輪郭から0と1の二値の内部のマスク画像を作る。
     mask_img = np.zeros(frame.shape, dtype=np.uint8)
     cv2.drawContours(mask_img, conts, -1, (1,1,1), -1)
@@ -203,39 +208,111 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
 
     cv2.drawContours(clip_img, conts, -1, (255,0,0), 10)
 
-    x1, y1, w1, h1 = cv2.boundingRect(mask_img[:,:,0])
+    # x1, y1, w1, h1 = cv2.boundingRect(mask_img[:,:,0])
+    rect = cv2.minAreaRect(contour)
+    # box = cv2.boxPoints(rect)
+    # box = np.int0(box)
+    # cv2.drawContours(clip_img,[box],0,(0,0,255),2)
 
-    cv2.rectangle(clip_img , (x1, y1), (x1 + w1, y1 + h1), (0, 255, 0), 3)    
+
+
+    # 矩形の中心
+    ((cx, cy), (w, h), theta_deg) = rect
+    # cx, cy, w, h = np.int0([cx, cy, w, h])
+    cv2.circle(clip_img, (int(cx), int(cy)), 10, (255,255,255), -1)
+
+    if 45 < theta_deg:
+        flip = "*"
+        w, h = h, w
+        theta_deg -= 90
+
+    else:
+        flip = ""
+
+
+    minx, miny = [ cx - 0.5 * w, cy - 0.5 * h ]
+    corners = np.array([ [ minx, miny ], [ minx + w, miny ], [ minx + w, miny + h ], [ minx, miny + h ]  ])
+    centre = np.array([cx, cy])
+
+    cv2.rectangle(clip_img, np.int0(corners[0,:]), np.int0(corners[2,:]), (0,255,0),3)
+
+
+    theta = - math.radians(theta_deg)
+    rotation = np.array([ [ np.cos(theta), -np.sin(theta) ],
+                          [ np.sin(theta),  np.cos(theta) ] ])
+
+    box = np.matmul(corners - centre, rotation) + centre
+    box = np.int0(box)
+    cv2.drawContours(clip_img,[ box ], 0, (0,0,255),2)
+
+    x2, y2, w2, h2, th2 = _corners2rotatedbbox(box)
+
+    dx = abs(minx - x2)
+    dy = abs(miny - y2)
+    dw = abs(w - w2)
+    dh = abs(h - h2)
+    dt = abs(theta_deg - math.degrees(th2))
+
+    if dX < dx or dY < dy or dW < dw or dH < dh or dT < dt:
+        dX, dY, dW, dH, dT = [ max(dX,dx), max(dY,dy), max(dW,dw), max(dH,dh), max(dT,dt) ]
+
+        print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (dX, dY, dW, dH, dT))
+        # print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f %s' % (minx, miny, w, h, theta_deg, flip))
+        # print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (x2, y2, w2, h2, math.degrees(th2)))
+
+    cs = ((255,255,255), (128,128, 128), (0,255,0), (0,0,255))
+    for i in range(4):
+        cv2.circle(clip_img, (int(box[i,0]), int(box[i,1])), 10, cs[i], -1)
 
     showImg('-image21-', clip_img)
 
-    dx = width  / 2 - cx
-    dy = height / 2 - cy
-
-    m1 = np.array([
-        [ 1, 0, dx], 
-        [ 0, 1, dy], 
-        [ 0, 0,  1]
-    ], dtype=np.float32)
-
-    body_img2 = cv2.warpAffine(clip_img, m1[:2,:], (width, height))
-    showImg('-image22-', body_img2)
-
-    center = (width / 2, height / 2)
-    rotAngle += 1
-    m2 = cv2.getRotationMatrix2D(center, rotAngle , 1)
-
-    body_img3 = cv2.warpAffine(body_img2, m2[:2,:], (width, height))
-
-    m2 = np.concatenate((m2, np.array([[0.0, 0.0, 1.0]])))
-    m3 = np.dot(m1, m2)
-    M = m3[:2,:]
-
-
-    showImg('-image23-', body_img3)
-
     return contour, mask_img, edge_img
- 
+
+def _corners2rotatedbbox(corners):
+    corners = np.array(corners)
+    centre = np.mean(np.array(corners), 0)
+    theta = calc_bearing(corners[0], corners[1])
+    rotation = np.array([[np.cos(theta), -np.sin(theta)],
+                         [np.sin(theta), np.cos(theta)]])
+    out_points = np.matmul(corners - centre, rotation) + centre
+    x, y = list(out_points[0,:])
+    w, h = list(out_points[2, :] - out_points[0, :])
+    return [x, y, w, h, theta]
+
+def calc_bearing(point1, point2):
+    x1, y1 = point1
+    x2, y2 = point2
+    theta = math.atan2(y2 - y1, x2 - x1)
+    theta = nor_theta(theta)
+    return theta
+
+def nor_theta(theta):
+    if theta > math.radians(45):
+        theta -= math.radians(90)
+        theta = nor_theta(theta)
+    elif theta <= math.radians(-45):
+        theta += math.radians(90)
+        theta = nor_theta(theta)
+    return theta
+
+def initJson(image_classes):
+    jobj = {
+        "annotations":[],
+        "images":[],
+        "categories":[]
+    }
+
+    for i, img_class in enumerate(image_classes):
+        o = {
+            "supercategory": f'super-{img_class.name}',
+            "id": i + 1,
+            "name": img_class.name
+        }
+
+        jobj["categories"].append(o)
+
+    return jobj;
+
 def showVideo(frame):
     global bgImgPaths, bgImgIdx, multipleIdx
 
@@ -270,22 +347,29 @@ def showVideo(frame):
     if contour is None:
         return
 
-    # コントラストと輝度を変える。
-    img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
-    img_hsv2 = np.copy(img_hsv)
+    if True:
+        img_yuv = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
+        img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
+        frame2 = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)        
 
-    s_mag = random.uniform(0.5, 1.0)
-    v_mag = random.uniform(0.5, 1.0)
+    else:
+        # コントラストと輝度を変える。
+        img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
+        img_hsv2 = np.copy(img_hsv)
 
-    img_hsv2[:,:,(1)] = img_hsv2[:,:,(1)] * s_mag
-    img_hsv2[:,:,(2)] = img_hsv2[:,:,(2)] * v_mag
+        s_mag = random.uniform(0.5, 1.0)
+        v_mag = random.uniform(0.5, 1.0)
 
-    frame2 = cv2.cvtColor(img_hsv2, cv2.COLOR_HSV2BGR)
+        img_hsv2[:,:,(1)] = img_hsv2[:,:,(1)] * s_mag
+        img_hsv2[:,:,(2)] = img_hsv2[:,:,(2)] * v_mag
 
-    # 元画像から
+        frame2 = cv2.cvtColor(img_hsv2, cv2.COLOR_HSV2BGR)
+
+    # 元画像にマスクをかける。
     clip_img = frame2 * mask_img
 
-    x, y, w, h = cv2.boundingRect(contour)
+    ((x, y), (w, h), th) = cv2.minAreaRect(contour)
+    # x, y, w, h = cv2.boundingRect(contour)
 
     rows, cols = frame.shape[:2]
 
@@ -624,6 +708,7 @@ if __name__ == '__main__':
             isSaving = True
             multipleIdx = 0
             multipleIdx = 0
+            AnnoObj = initJson([ imageClasses[classIdx] ])
 
             saveImgs()
 
@@ -631,6 +716,7 @@ if __name__ == '__main__':
             classIdx = 0;
             saveAll = True
             isSaving = True
+            AnnoObj = initJson(imageClasses)
 
             saveImgs()
 
