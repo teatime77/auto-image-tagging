@@ -10,6 +10,7 @@ import PySimpleGUI as sg
 from PIL import Image, ImageTk
 import random
 import time
+import json
 
 Next_Sibling, Previous_Sibling, First_Child, Parent = (0, 1, 2, 3)
 
@@ -135,6 +136,10 @@ def readCap():
                     csvFile.close()
                     csvFile = None
 
+                    with open('train.json', 'w') as f:
+                        json.dump(AnnoObj, f, indent=4)
+
+
                 setPlaying(False)
                 # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         
@@ -154,11 +159,60 @@ def useHSV(img_hsv):
     # Hueの指定範囲からの差をグレースケールで表示する。
     diff_img = np.where(hue < H_lo, 90 + hue - H_lo, np.where(H_hi < hue, 90 + hue - H_hi, 90))
 
-rotAngle = 0
+def showRot(img, cx, cy, w, h, theta_deg, img_key):
+    global dX, dY, dW, dH, dT
+
+    # cx, cy, w, h = np.int0([cx, cy, w, h])
+    cv2.circle(img, (int(cx), int(cy)), 10, (255,255,255), -1)
+
+    if 45 < theta_deg:
+        flip = "*"
+        w, h = h, w
+        theta_deg -= 90
+
+    else:
+        flip = ""
+
+    minx, miny = [ cx - 0.5 * w, cy - 0.5 * h ]
+    corners = np.array([ [ minx, miny ], [ minx + w, miny ], [ minx + w, miny + h ], [ minx, miny + h ]  ])
+    centre = np.array([cx, cy])
+
+    cv2.rectangle(img, np.int0(corners[0,:]), np.int0(corners[2,:]), (0,255,0),3)
+
+
+    theta = - math.radians(theta_deg)
+    rotation = np.array([ [ np.cos(theta), -np.sin(theta) ],
+                          [ np.sin(theta),  np.cos(theta) ] ])
+
+    corners = np.matmul(corners - centre, rotation) + centre
+    corners = np.int0(corners)
+    cv2.drawContours(img,[ corners ], 0, (0,0,255),2)
+
+    bbox = _corners2rotatedbbox(corners)
+    x2, y2, w2, h2, th2 = bbox
+
+    dx = abs(minx - x2)
+    dy = abs(miny - y2)
+    dw = abs(w - w2)
+    dh = abs(h - h2)
+    dt = abs(theta_deg - math.degrees(th2))
+
+    if dX < dx or dY < dy or dW < dw or dH < dh or dT < dt:
+        dX, dY, dW, dH, dT = [ max(dX,dx), max(dY,dy), max(dW,dw), max(dH,dh), max(dT,dt) ]
+
+    print(f'    Dx:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (dX, dY, dW, dH, dT))
+    print(f'     x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f %s' % (minx, miny, w, h, theta_deg, flip))
+    # print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (x2, y2, w2, h2, math.degrees(th2)))
+
+    cs = ((255,255,255), (128,128, 128), (0,255,0), (0,0,255))
+    for i in range(4):
+        cv2.circle(img, (int(corners[i,0]), int(corners[i,1])), 10, cs[i], -1)
+
+    showImg(img_key, img)
+
+    return (bbox, corners)
 
 def showContours(frame, bin_img, contours, hierarchy, idx, nest):
-    global rotAngle, dX, dY, dW, dH, dT
-
     contour = contours[idx]
 
     img_area = bin_img.shape[0] * bin_img.shape[1]
@@ -166,7 +220,7 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
     ratio = 100 * np.sqrt(area) / np.sqrt(img_area)
 
     if ratio < 40:
-        return None, None, None
+        return 8 * [None]
 
     M = cv2.moments(contour)
     cx = int(M['m10']/M['m00'])
@@ -181,7 +235,7 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
         pass
     else:
         print("%s %d [%d, %d, %d, %d] area:%.1f c(%d, %d)" % (' ' * (nest * 4), idx, hierarchy[0][idx][Next_Sibling], hierarchy[0][idx][Previous_Sibling], hierarchy[0][idx][First_Child], hierarchy[0][idx][Parent], ratio, rx, ry))
-        return None, None, None
+        return 8 * [None]
 
     # showImg('-image21-', cmp_img)
 
@@ -218,55 +272,10 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
 
     # 矩形の中心
     ((cx, cy), (w, h), theta_deg) = rect
-    # cx, cy, w, h = np.int0([cx, cy, w, h])
-    cv2.circle(clip_img, (int(cx), int(cy)), 10, (255,255,255), -1)
 
-    if 45 < theta_deg:
-        flip = "*"
-        w, h = h, w
-        theta_deg -= 90
+    cx, cy, w, h, theta_deg = showRot(clip_img, cx, cy, w, h, theta_deg, '-image21-')
 
-    else:
-        flip = ""
-
-
-    minx, miny = [ cx - 0.5 * w, cy - 0.5 * h ]
-    corners = np.array([ [ minx, miny ], [ minx + w, miny ], [ minx + w, miny + h ], [ minx, miny + h ]  ])
-    centre = np.array([cx, cy])
-
-    cv2.rectangle(clip_img, np.int0(corners[0,:]), np.int0(corners[2,:]), (0,255,0),3)
-
-
-    theta = - math.radians(theta_deg)
-    rotation = np.array([ [ np.cos(theta), -np.sin(theta) ],
-                          [ np.sin(theta),  np.cos(theta) ] ])
-
-    box = np.matmul(corners - centre, rotation) + centre
-    box = np.int0(box)
-    cv2.drawContours(clip_img,[ box ], 0, (0,0,255),2)
-
-    x2, y2, w2, h2, th2 = _corners2rotatedbbox(box)
-
-    dx = abs(minx - x2)
-    dy = abs(miny - y2)
-    dw = abs(w - w2)
-    dh = abs(h - h2)
-    dt = abs(theta_deg - math.degrees(th2))
-
-    if dX < dx or dY < dy or dW < dw or dH < dh or dT < dt:
-        dX, dY, dW, dH, dT = [ max(dX,dx), max(dY,dy), max(dW,dw), max(dH,dh), max(dT,dt) ]
-
-        print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (dX, dY, dW, dH, dT))
-        # print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f %s' % (minx, miny, w, h, theta_deg, flip))
-        # print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (x2, y2, w2, h2, math.degrees(th2)))
-
-    cs = ((255,255,255), (128,128, 128), (0,255,0), (0,0,255))
-    for i in range(4):
-        cv2.circle(clip_img, (int(box[i,0]), int(box[i,1])), 10, cs[i], -1)
-
-    showImg('-image21-', clip_img)
-
-    return contour, mask_img, edge_img
+    return contour, mask_img, edge_img, cx, cy, w, h, theta_deg
 
 def _corners2rotatedbbox(corners):
     corners = np.array(corners)
@@ -340,7 +349,7 @@ def showVideo(frame):
         if hierarchy[0][idx][Parent] == -1:
             # トップレベルの場合
 
-            contour, mask_img, edge_img = showContours(frame, bin_img, contours, hierarchy, idx, 0)
+            contour, mask_img, edge_img, cx, cy, w, h, theta_deg = showContours(frame, bin_img, contours, hierarchy, idx, 0)
             if contour is not None:
                 break
 
@@ -368,8 +377,9 @@ def showVideo(frame):
     # 元画像にマスクをかける。
     clip_img = frame2 * mask_img
 
-    ((x, y), (w, h), th) = cv2.minAreaRect(contour)
-    # x, y, w, h = cv2.boundingRect(contour)
+    minx = cx - 0.5 * w
+    miny = cy - 0.5 * h
+    # ((minx, miny), (w, h), th) = cv2.minAreaRect(contour)
 
     rows, cols = frame.shape[:2]
 
@@ -378,25 +388,34 @@ def showVideo(frame):
     min_scale = 0.7 * max_scale
     scale = random.uniform(min_scale, max_scale)
 
+    center = (minx + 0.5 * w, miny + 0.5 * h)
+
     # スケール変換する。
-    x, y, w, h =[ round(scale * c) for c in (x, y, w, h)]
+    minx, miny, w, h =[ round(scale * c) for c in (minx, miny, w, h)]
     
     # 乱数で移動量を決める。
     mg = abs(w - h)
-    dx = random.randint(-x + mg, cols - (x + w) - mg)
-    dy = random.randint(-y + mg, rows - (y + h) - mg)
+    dx = random.uniform(mg + 0.5 * w - cx, cols - (cx + 0.5 * w) - mg)
+    dy = random.uniform(mg + 0.5 * h - cy, rows - (cy + 0.5 * h) - mg)
 
-    # スケールと平行移動の変換行列
-    M = np.float32([
-        [scale,     0, dx],
-        [    0, scale, dy]
-    ])
+    # mg < cx + dx < cols - w
 
-    center = (x + 0.5 * w, y + 0.5 * h)
-    angle = random.uniform(0.0, 360.0)
+    # center = (minx + 0.5 * w, miny + 0.5 * h)
+
+    # 0 <= theta_deg - angle <= 90
+    # theta_deg - 90 <= angle <= theta_deg
+    # angle = random.uniform(theta_deg - 90, theta_deg)
+
+    # -44 <= theta_deg - angle <= 44
+    # theta_deg - 44 <= angle <= theta_deg + 44
+    angle = random.uniform(theta_deg - 44, theta_deg + 44)
+    assert(-44 <= theta_deg - angle and theta_deg - angle <= 44)
+
+    # 回転とスケール
     m1 = cv2.getRotationMatrix2D(center, angle , scale)
     m1 = np.concatenate((m1, np.array([[0.0, 0.0, 1.0]])))
 
+    # 平行移動
     m2 = np.array([
         [ 1, 0, dx], 
         [ 0, 1, dy], 
@@ -432,6 +451,22 @@ def showVideo(frame):
     # 矩形の左上と右下の座標
     xmin, ymin, xmax, ymax = ( x1, y1, x1 + w1, y1 + h1 )
 
+
+    # 矩形を描く。
+    if True:
+        # rect = cv2.minAreaRect(contour2)
+        # ((cx, cy), (w, h), theta_deg) = rect
+
+        showRot(dst_img2 , cx + dx, cy + dy, w, h, theta_deg - angle, '-image31-')
+        bbox, corners = showRot(compo_img, cx + dx, cy + dy, w, h, theta_deg - angle, '-image32-')
+
+    else:
+        cv2.rectangle(dst_img2 , (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
+        cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
+
+        showImg('-image31-', dst_img2)
+        showImg('-image32-', compo_img)
+
     pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
     test_img_path = f'{output_dir}/img/{classIdx}-{saveVideoIdx}-{pos}-{multipleIdx}.png'
     cv2.imwrite(test_img_path, compo_img)
@@ -441,12 +476,21 @@ def showVideo(frame):
     if csvFile is not None:
         csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax},{classIdx+1}\n')
 
-    # 矩形を描く。
-    cv2.rectangle(dst_img2 , (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
-    cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
+        image_id = len(AnnoObj["images"]) + 1
+        AnnoObj["images"].append({
+            "id" : image_id,
+            "file_name" : file_name            
+        })
 
-    showImg('-image31-', dst_img2)
-    showImg('-image32-', compo_img)
+        anno_id = len(AnnoObj["annotations"]) + 1
+        AnnoObj["annotations"].append({
+            "id" : anno_id,
+            "image_id" : image_id, 
+            "category_id" : classIdx + 1,
+            "bbox" : bbox ,  # all floats
+            "area": bbox[2] * bbox[3],           # w * h. Required for validation scores
+            "iscrowd": 0            # Required for validation scores            
+        })
 
     multiple = int(values['-multiple-'])
     multipleIdx = (multipleIdx + 1) % multiple
