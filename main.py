@@ -125,6 +125,7 @@ def readCap():
         else:
 
             classIdx += 1
+            saveVideoIdx = 0
 
             if saveAll and classIdx < len(imageClasses):
                 cap.release()
@@ -136,9 +137,8 @@ def readCap():
                     csvFile.close()
                     csvFile = None
 
-                    with open('train.json', 'w') as f:
+                    with open(f'{output_dir}/train.json', 'w') as f:
                         json.dump(AnnoObj, f, indent=4)
-
 
                 setPlaying(False)
                 # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -162,16 +162,10 @@ def useHSV(img_hsv):
 def showRot(img, cx, cy, w, h, theta_deg, img_key):
     global dX, dY, dW, dH, dT
 
+    assert(abs(theta_deg) <= 45)
+
     # cx, cy, w, h = np.int0([cx, cy, w, h])
     cv2.circle(img, (int(cx), int(cy)), 10, (255,255,255), -1)
-
-    if 45 < theta_deg:
-        flip = "*"
-        w, h = h, w
-        theta_deg -= 90
-
-    else:
-        flip = ""
 
     minx, miny = [ cx - 0.5 * w, cy - 0.5 * h ]
     corners = np.array([ [ minx, miny ], [ minx + w, miny ], [ minx + w, miny + h ], [ minx, miny + h ]  ])
@@ -201,7 +195,7 @@ def showRot(img, cx, cy, w, h, theta_deg, img_key):
         dX, dY, dW, dH, dT = [ max(dX,dx), max(dY,dy), max(dW,dw), max(dH,dh), max(dT,dt) ]
 
     print(f'    Dx:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (dX, dY, dW, dH, dT))
-    print(f'     x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f %s' % (minx, miny, w, h, theta_deg, flip))
+    print(f'     x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (minx, miny, w, h, theta_deg))
     # print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (x2, y2, w2, h2, math.degrees(th2)))
 
     cs = ((255,255,255), (128,128, 128), (0,255,0), (0,0,255))
@@ -273,7 +267,11 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
     # 矩形の中心
     ((cx, cy), (w, h), theta_deg) = rect
 
-    cx, cy, w, h, theta_deg = showRot(clip_img, cx, cy, w, h, theta_deg, '-image21-')
+    if 45 < theta_deg:
+        w, h = h, w
+        theta_deg -= 90
+
+    showRot(clip_img, cx, cy, w, h, theta_deg, '-image21-')
 
     return contour, mask_img, edge_img, cx, cy, w, h, theta_deg
 
@@ -451,25 +449,15 @@ def showVideo(frame):
     # 矩形の左上と右下の座標
     xmin, ymin, xmax, ymax = ( x1, y1, x1 + w1, y1 + h1 )
 
-
-    # 矩形を描く。
-    if True:
-        # rect = cv2.minAreaRect(contour2)
-        # ((cx, cy), (w, h), theta_deg) = rect
-
-        showRot(dst_img2 , cx + dx, cy + dy, w, h, theta_deg - angle, '-image31-')
-        bbox, corners = showRot(compo_img, cx + dx, cy + dy, w, h, theta_deg - angle, '-image32-')
-
-    else:
-        cv2.rectangle(dst_img2 , (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
-        cv2.rectangle(compo_img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)    
-
-        showImg('-image31-', dst_img2)
-        showImg('-image32-', compo_img)
-
     pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
     test_img_path = f'{output_dir}/img/{classIdx}-{saveVideoIdx}-{pos}-{multipleIdx}.png'
     cv2.imwrite(test_img_path, compo_img)
+
+
+    # 矩形を描く。
+    showRot(dst_img2 , cx + dx, cy + dy, w, h, theta_deg - angle, '-image31-')
+    bbox, corners = showRot(compo_img, cx + dx, cy + dy, w, h, theta_deg - angle, '-image32-')
+
 
     file_name = os.path.basename(test_img_path)
 
