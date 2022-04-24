@@ -467,6 +467,8 @@ def showVideo(frame):
         image_id = len(AnnoObj["images"]) + 1
         AnnoObj["images"].append({
             "id" : image_id,
+            "width": cols,
+            "height": rows,
             "file_name" : file_name            
         })
 
@@ -476,6 +478,7 @@ def showVideo(frame):
             "image_id" : image_id, 
             "category_id" : classIdx + 1,
             "bbox" : bbox ,  # all floats
+            "segmentation" : corners.tolist(),
             "area": bbox[2] * bbox[3],           # w * h. Required for validation scores
             "iscrowd": 0            # Required for validation scores            
         })
