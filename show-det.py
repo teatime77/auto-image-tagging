@@ -1,11 +1,15 @@
+import sys
 import numpy as np
 import time
 import json
 import cv2
 
+detections_json = sys.argv[1]
+img_dir = sys.argv[2]
+
 cv2.namedWindow('window')
 
-with open('detections.json') as f:
+with open(detections_json) as f:
     df = json.load(f)
 
 # for cat in df['categories']:
@@ -17,8 +21,8 @@ for img_inf in df['images']:
         continue
 
 
-
-    img_path = '/home/hamada/prj/data/箱/img/' + img_inf['file_name']
+    file_name = img_inf['file_name']
+    img_path = f'{img_dir}/{file_name}'
     img = cv2.imread(img_path)
 
     for ann in anns:

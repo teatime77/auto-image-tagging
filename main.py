@@ -354,23 +354,24 @@ def showVideo(frame):
     if contour is None:
         return
 
-    if True:
-        img_yuv = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
-        img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
-        frame2 = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)        
+    frame2 = frame.copy()
+    # if True:
+    #     img_yuv = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
+    #     img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
+    #     frame2 = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)        
 
-    else:
-        # コントラストと輝度を変える。
-        img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
-        img_hsv2 = np.copy(img_hsv)
+    # else:
+    #     # コントラストと輝度を変える。
+    #     img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
+    #     img_hsv2 = np.copy(img_hsv)
 
-        s_mag = random.uniform(0.5, 1.0)
-        v_mag = random.uniform(0.5, 1.0)
+    #     s_mag = random.uniform(0.5, 1.0)
+    #     v_mag = random.uniform(0.5, 1.0)
 
-        img_hsv2[:,:,(1)] = img_hsv2[:,:,(1)] * s_mag
-        img_hsv2[:,:,(2)] = img_hsv2[:,:,(2)] * v_mag
+    #     img_hsv2[:,:,(1)] = img_hsv2[:,:,(1)] * s_mag
+    #     img_hsv2[:,:,(2)] = img_hsv2[:,:,(2)] * v_mag
 
-        frame2 = cv2.cvtColor(img_hsv2, cv2.COLOR_HSV2BGR)
+    #     frame2 = cv2.cvtColor(img_hsv2, cv2.COLOR_HSV2BGR)
 
     # 元画像にマスクをかける。
     clip_img = frame2 * mask_img
