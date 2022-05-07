@@ -127,3 +127,14 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+*.png
+*.jpg
+data/
+infer/onnxruntime_dml_env/
+infer/openvino_env/
+infer/*.pth
+infer/*.onnx
+infer/*.bin
+infer/*.xml
+infer/*.mapping
