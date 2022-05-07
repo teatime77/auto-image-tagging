@@ -14,7 +14,7 @@ import json
 
 Next_Sibling, Previous_Sibling, First_Child, Parent = (0, 1, 2, 3)
 
-
+trainSize = 3000
 window_name = 'frame'
 bin_name = 'bin'
 playing = False
@@ -22,8 +22,7 @@ RedBG=False
 saveAll = False
 isSaving = False
 csvFile = None
-multipleIdx = 0
-framePrev = None
+AnnoObj = None
 
 classIdx = 0
 imageClasses = []
@@ -32,7 +31,7 @@ H_lo =  80
 H_hi = 140
 S_lo =   0
 S_hi = 255
-V_lo = 240
+V_lo = 253
 V_hi = 255
 
 S_mag =  100
@@ -97,12 +96,24 @@ def showImg(key, img):
 
     window[key].update(data=image_tk, size=(256,256))
 
-def readCap():
-    global cap, saveVideoIdx, csvFile, classIdx, framePrev
+def stopSave():
+    global saveVideoIdx, csvFile, classIdx
 
-    if isSaving and multipleIdx != 0:
-        showVideo(framePrev)
-        return
+    saveVideoIdx = 0
+    classIdx = 0
+
+    if csvFile is not None:
+        csvFile.close()
+        csvFile = None
+
+        with open(f'{output_dir}/train.json', 'w') as f:
+            json.dump(AnnoObj, f, indent=4)
+
+    setPlaying(False)
+    # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+def readCap():
+    global cap, saveVideoIdx, csvFile, classIdx
 
     ret, frame = cap.read()
     if ret:
@@ -112,36 +123,42 @@ def readCap():
         window['-img-pos-'].update(value=pos)
 
         showVideo(frame)
-        framePrev = frame
+
+        if AnnoObj is not None:
+            images_len = len(AnnoObj["images"])
+
+            if trainSize <= images_len:
+
+                cap.release()
+                stopSave()
+                print("保存終了")
+
+            elif images_len % 10 == 0:
+                print("images len", images_len)
 
     else:
 
         saveVideoIdx += 1
 
+        cap.release()
+
         if saveVideoIdx < len(imageClasses[classIdx].videoPathes):
-            cap.release()
+            # 同じクラスの別の動画ファイルがある場合
 
             cap = initCap()
         else:
+            # 同じクラスの別の動画ファイルがない場合
 
-            classIdx += 1
+            classIdx = (classIdx + 1) % len(imageClasses)
             saveVideoIdx = 0
 
-            if saveAll and classIdx < len(imageClasses):
-                cap.release()
+            if not saveAll or trainSize < len(AnnoObj["images"]):
 
-                cap = initCap()
+                stopSave()
 
             else:
-                if csvFile is not None:
-                    csvFile.close()
-                    csvFile = None
 
-                    with open(f'{output_dir}/train.json', 'w') as f:
-                        json.dump(AnnoObj, f, indent=4)
-
-                setPlaying(False)
-                # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                cap = initCap()
         
 def diffHue(hue):
     if hue < H_lo:
@@ -194,8 +211,9 @@ def showRot(img, cx, cy, w, h, theta_deg, img_key):
     if dX < dx or dY < dy or dW < dw or dH < dh or dT < dt:
         dX, dY, dW, dH, dT = [ max(dX,dx), max(dY,dy), max(dW,dw), max(dH,dh), max(dT,dt) ]
 
-    print(f'    Dx:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (dX, dY, dW, dH, dT))
-    print(f'     x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (minx, miny, w, h, theta_deg))
+    # print(f'    Dx:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (dX, dY, dW, dH, dT))
+    # print(f'     x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (minx, miny, w, h, theta_deg))
+
     # print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (x2, y2, w2, h2, math.degrees(th2)))
 
     cs = ((255,255,255), (128,128, 128), (0,255,0), (0,0,255))
@@ -321,7 +339,7 @@ def initJson(image_classes):
     return jobj;
 
 def showVideo(frame):
-    global bgImgPaths, bgImgIdx, multipleIdx
+    global bgImgPaths, bgImgIdx
 
     # 原画を表示する。
     showImg('-image11-', frame)
@@ -341,7 +359,7 @@ def showVideo(frame):
     assert(len(hierarchy.shape) == 3 and hierarchy.shape[0] == 1 and hierarchy.shape[2] == 4)
     assert(len(contours) == hierarchy.shape[1])
 
-    print('-' * 50)
+    # print('-' * 50)
     contour = None
     for idx, _ in enumerate(contours):
         if hierarchy[0][idx][Parent] == -1:
@@ -450,22 +468,21 @@ def showVideo(frame):
     # 矩形の左上と右下の座標
     xmin, ymin, xmax, ymax = ( x1, y1, x1 + w1, y1 + h1 )
 
-    pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
-    test_img_path = f'{output_dir}/img/{classIdx}-{saveVideoIdx}-{pos}-{multipleIdx}.png'
-    cv2.imwrite(test_img_path, compo_img)
-
-
     # 矩形を描く。
     showRot(dst_img2 , cx + dx, cy + dy, w, h, theta_deg - angle, '-image31-')
-    bbox, corners = showRot(compo_img, cx + dx, cy + dy, w, h, theta_deg - angle, '-image32-')
-
-
-    file_name = os.path.basename(test_img_path)
+    bbox, corners = showRot(compo_img.copy(), cx + dx, cy + dy, w, h, theta_deg - angle, '-image32-')
 
     if csvFile is not None:
-        csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax},{classIdx+1}\n')
 
         image_id = len(AnnoObj["images"]) + 1
+
+        pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+        test_img_path = f'{output_dir}/img/{classIdx}-{saveVideoIdx}-{pos}-{image_id}.png'
+        cv2.imwrite(test_img_path, compo_img)
+
+        file_name = os.path.basename(test_img_path)
+        csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax},{classIdx+1}\n')
+
         AnnoObj["images"].append({
             "id" : image_id,
             "width": cols,
@@ -483,9 +500,6 @@ def showVideo(frame):
             "area": bbox[2] * bbox[3],           # w * h. Required for validation scores
             "iscrowd": 0            # Required for validation scores            
         })
-
-    multiple = int(values['-multiple-'])
-    multipleIdx = (multipleIdx + 1) % multiple
 
 def get_tree_data(video_dir):
     global video_pathes, imageClasses
@@ -606,12 +620,14 @@ if __name__ == '__main__':
     bg_img_dir = sys.argv[2]
 
     output_dir = sys.argv[3]
-    print(f'変換先:{output_dir}')
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(f'{output_dir}/img', exist_ok=True)
 
 
     bgImgPaths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
+
+    print(f'背景画像数:{len(bgImgPaths)}')
+
     bgImgIdx = 0
 
     sg.theme('DarkAmber')   # Add a touch of color
@@ -653,7 +669,7 @@ if __name__ == '__main__':
         spin('H lo', '-Hlo-', H_lo, 0, 180) + spin('H hi', '-Hhi-', H_hi, 0, 180) + [ sg.Image(filename='', key='-Hbar-'), sg.Checkbox('赤背景', default=RedBG, key='-RedBG-', enable_events=True) ],
         spin('S lo', '-Slo-', S_lo, 0, 255) + spin('S hi', '-Shi-', S_hi, 0, 255) + [ sg.Image(filename='', key='-Sbar-') ],
         spin('V lo', '-Vlo-', V_lo, 0, 255) + spin('V hi', '-Vhi-', V_hi, 0, 255) + [ sg.Image(filename='', key='-Vbar-') ],
-        spin('倍数', '-multiple-', 1, 1, 10) + spin('S mag', '-S_mag-', 100, 10, 200) + spin('V mag', '-V_mag-', 100, 10, 200),
+        spin('S mag', '-S_mag-', 100, 10, 200) + spin('V mag', '-V_mag-', 100, 10, 200),
         [sg.Text('Enter something on Row 2'), sg.InputText()],
         [ sg.Button('Play', key='-play/pause-'), sg.Button('Save', key='-save-'), sg.Button('Save All', key='-save-all-'), sg.Button('Close')] ]
 
@@ -742,8 +758,6 @@ if __name__ == '__main__':
             classIdx = v[0][0]
             saveAll = False
             isSaving = True
-            multipleIdx = 0
-            multipleIdx = 0
             AnnoObj = initJson([ imageClasses[classIdx] ])
 
             saveImgs()
