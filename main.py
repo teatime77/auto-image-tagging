@@ -14,11 +14,8 @@ import json
 
 Next_Sibling, Previous_Sibling, First_Child, Parent = (0, 1, 2, 3)
 
-trainSize = 3000
-window_name = 'frame'
-bin_name = 'bin'
+data_size = 3000
 playing = False
-RedBG=False
 saveAll = False
 isSaving = False
 csvFile = None
@@ -27,10 +24,6 @@ AnnoObj = None
 classIdx = 0
 imageClasses = []
 
-H_lo =  80
-H_hi = 140
-S_lo =   0
-S_hi = 255
 V_lo = 253
 V_hi = 255
 
@@ -48,17 +41,6 @@ class ImageClass:
         self.name = name
         self.classDir = class_dir
         self.videoPathes = []
-
-def printing(position):
-    global H_lo, H_hi, S_lo, S_hi, V_lo, V_hi
-
-    H_lo = cv2.getTrackbarPos('H lo', window_name)
-    H_hi = cv2.getTrackbarPos('H hi', window_name)
-    S_lo = cv2.getTrackbarPos('S lo', window_name)
-    S_hi = cv2.getTrackbarPos('S hi', window_name)
-    V_lo = cv2.getTrackbarPos('V lo', window_name)
-    V_hi = cv2.getTrackbarPos('V hi', window_name)
-    print(H_lo, H_hi, S_lo, S_hi, V_lo, V_hi)
 
 
 
@@ -82,7 +64,7 @@ def initCap():
 
     return cap
 
-def showImg(key, img):
+def show_image(key, img):
     img = cv2.resize(img, dsize=(256, 256))       
 
     if len(img.shape) == 3:
@@ -117,7 +99,6 @@ def readCap():
 
     ret, frame = cap.read()
     if ret:
-        # showImg('-image11-', frame)
 
         pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
         window['-img-pos-'].update(value=pos)
@@ -127,7 +108,7 @@ def readCap():
         if AnnoObj is not None:
             images_len = len(AnnoObj["images"])
 
-            if trainSize <= images_len:
+            if data_size <= images_len:
 
                 cap.release()
                 stopSave()
@@ -152,7 +133,7 @@ def readCap():
             classIdx = (classIdx + 1) % len(imageClasses)
             saveVideoIdx = 0
 
-            if not saveAll or trainSize < len(AnnoObj["images"]):
+            if not saveAll or data_size < len(AnnoObj["images"]):
 
                 stopSave()
 
@@ -160,50 +141,37 @@ def readCap():
 
                 cap = initCap()
         
-def diffHue(hue):
-    if hue < H_lo:
-        return 90 + hue - H_lo
-    elif H_hi < hue:
-        return 90 + hue - H_hi
-    else:
-        return 90
 
-def useHSV(img_hsv):
-
-    # Hueを取り出す。
-    hue = img_hsv[:, :, 0]
-
-    # Hueの指定範囲からの差をグレースケールで表示する。
-    diff_img = np.where(hue < H_lo, 90 + hue - H_lo, np.where(H_hi < hue, 90 + hue - H_hi, 90))
-
-def showRot(img, cx, cy, w, h, theta_deg, img_key):
+def showRot(img, cx, cy, w, h, theta_deg):
     global dX, dY, dW, dH, dT
 
     assert(abs(theta_deg) <= 45)
 
-    # cx, cy, w, h = np.int0([cx, cy, w, h])
-    cv2.circle(img, (int(cx), int(cy)), 10, (255,255,255), -1)
+    # 矩形の左上のXY座標
+    min_x, min_y = [ cx - 0.5 * w, cy - 0.5 * h ]
 
-    minx, miny = [ cx - 0.5 * w, cy - 0.5 * h ]
-    corners = np.array([ [ minx, miny ], [ minx + w, miny ], [ minx + w, miny + h ], [ minx, miny + h ]  ])
+    # 矩形の4頂点の座標
+    corners_org = np.array([ [ min_x, min_y ], [ min_x + w, min_y ], [ min_x + w, min_y + h ], [ min_x, min_y + h ]  ])
+
+    # 矩形の中心のXY座標
     centre = np.array([cx, cy])
 
-    cv2.rectangle(img, np.int0(corners[0,:]), np.int0(corners[2,:]), (0,255,0),3)
-
-
     theta = - math.radians(theta_deg)
+
+    # 回転行列
     rotation = np.array([ [ np.cos(theta), -np.sin(theta) ],
                           [ np.sin(theta),  np.cos(theta) ] ])
 
-    corners = np.matmul(corners - centre, rotation) + centre
-    corners = np.int0(corners)
-    cv2.drawContours(img,[ corners ], 0, (0,0,255),2)
+    # 矩形の中心が原点(0,0)に来るように平行移動してから、回転をして、元の位置に平行移動する。
+    corners_rot = np.matmul(corners_org - centre, rotation) + centre
 
-    bbox = _corners2rotatedbbox(corners)
+    corners_rot = np.int0(corners_rot)
+
+    bbox = _corners2rotatedbbox(corners_rot)
     x2, y2, w2, h2, th2 = bbox
 
-    dx = abs(minx - x2)
-    dy = abs(miny - y2)
+    dx = abs(min_x - x2)
+    dy = abs(min_y - y2)
     dw = abs(w - w2)
     dh = abs(h - h2)
     dt = abs(theta_deg - math.degrees(th2))
@@ -212,34 +180,36 @@ def showRot(img, cx, cy, w, h, theta_deg, img_key):
         dX, dY, dW, dH, dT = [ max(dX,dx), max(dY,dy), max(dW,dw), max(dH,dh), max(dT,dt) ]
 
     # print(f'    Dx:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (dX, dY, dW, dH, dT))
-    # print(f'     x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (minx, miny, w, h, theta_deg))
+    # print(f'     x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (min_x, min_y, w, h, theta_deg))
 
     # print(f'    x:%.1f y:%.1f w:%.1f h:%.1f th:%.1f' % (x2, y2, w2, h2, math.degrees(th2)))
 
-    cs = ((255,255,255), (128,128, 128), (0,255,0), (0,0,255))
-    for i in range(4):
-        cv2.circle(img, (int(corners[i,0]), int(corners[i,1])), 10, cs[i], -1)
-
-    showImg(img_key, img)
-
-    return (bbox, corners)
+    return (bbox, corners_org, corners_rot)
 
 def showContours(frame, bin_img, contours, hierarchy, idx, nest):
     contour = contours[idx]
 
-    img_area = bin_img.shape[0] * bin_img.shape[1]
+    # 二値画像の幅と高さ
+    width  = bin_img.shape[0]
+    height = bin_img.shape[1]
+
+    # 二値画像の面積
+    img_area = width * height
+
+    # 輪郭の面積
     area = cv2.contourArea(contour)
     ratio = 100 * np.sqrt(area) / np.sqrt(img_area)
 
     if ratio < 40:
         return 8 * [None]
 
+    # 輪郭のモーメントを計算する。
     M = cv2.moments(contour)
+
+    # モーメントから重心のXY座標を計算す。
     cx = int(M['m10']/M['m00'])
     cy = int(M['m01']/M['m00'])
 
-    width  = bin_img.shape[0]
-    height  = bin_img.shape[1]
     rx = int(100 * cx / width)
     ry = int(100 * cy / height)
 
@@ -248,8 +218,6 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
     else:
         print("%s %d [%d, %d, %d, %d] area:%.1f c(%d, %d)" % (' ' * (nest * 4), idx, hierarchy[0][idx][Next_Sibling], hierarchy[0][idx][Previous_Sibling], hierarchy[0][idx][First_Child], hierarchy[0][idx][Parent], ratio, rx, ry))
         return 8 * [None]
-
-    # showImg('-image21-', cmp_img)
 
     conts = [ contour ]
 
@@ -274,22 +242,21 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
 
     cv2.drawContours(clip_img, conts, -1, (255,0,0), 10)
 
-    # x1, y1, w1, h1 = cv2.boundingRect(mask_img[:,:,0])
+    # 回転を考慮した外接矩形を得る。
     rect = cv2.minAreaRect(contour)
-    # box = cv2.boxPoints(rect)
-    # box = np.int0(box)
-    # cv2.drawContours(clip_img,[box],0,(0,0,255),2)
 
-
-
-    # 矩形の中心
+    # 矩形の中心、サイズ、回転角を得る。
     ((cx, cy), (w, h), theta_deg) = rect
 
     if 45 < theta_deg:
         w, h = h, w
         theta_deg -= 90
 
-    showRot(clip_img, cx, cy, w, h, theta_deg, '-image21-')
+    bbox, corners_org, corners_rot = showRot(clip_img, cx, cy, w, h, theta_deg)
+
+    draw_auxiliary_line(clip_img, cx, cy, corners_org, corners_rot)
+
+    show_image('-image21-', clip_img)
 
     return contour, mask_img, edge_img, cx, cy, w, h, theta_deg
 
@@ -320,6 +287,24 @@ def nor_theta(theta):
         theta = nor_theta(theta)
     return theta
 
+def draw_auxiliary_line(img, cx, cy, corners_org, corners_rot):
+
+    # 矩形の中心に円を描く。
+    cv2.circle(img, (int(cx), int(cy)), 10, (255,255,255), -1)
+
+    # 回転前の矩形を緑色で描く。
+    cv2.rectangle(img, np.int0(corners_org[0,:]), np.int0(corners_org[2,:]), (0,255,0), 3)
+
+    # 回転後の矩形を緑色で描く。
+    cv2.drawContours(img, [ corners_rot ], 0, (0,0,255),2)
+
+    # 各頂点の色 = [ 白, 灰色, 緑, 赤 ]
+    point_colors = ((255,255,255), (128,128,128), (0,255,0), (0,0,255))
+
+    # 頂点を中心とする円を描く。
+    for i in range(4):
+        cv2.circle(img, (int(corners_rot[i,0]), int(corners_rot[i,1])), 10, point_colors[i], -1)
+
 def initJson(image_classes):
     jobj = {
         "annotations":[],
@@ -342,15 +327,15 @@ def showVideo(frame):
     global bgImgPaths, bgImgIdx
 
     # 原画を表示する。
-    showImg('-image11-', frame)
+    show_image('-image11-', frame)
 
     # グレー画像を表示する。
     gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-    showImg('-image12-', gray_img)
+    show_image('-image12-', gray_img)
 
     # 二値画像を表示する。
     bin_img = 255 - cv2.inRange(gray_img, V_lo, V_hi)
-    showImg('-image13-', bin_img)
+    show_image('-image13-', bin_img)
 
 
     # 二値化画像から輪郭のリストを得る。
@@ -373,30 +358,24 @@ def showVideo(frame):
         return
 
     frame2 = frame.copy()
-    # if True:
-    #     img_yuv = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
-    #     img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
-    #     frame2 = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)        
 
-    # else:
-    #     # コントラストと輝度を変える。
-    #     img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
-    #     img_hsv2 = np.copy(img_hsv)
+    # # コントラストと輝度を変える。
+    # img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
+    # img_hsv2 = np.copy(img_hsv)
 
-    #     s_mag = random.uniform(0.5, 1.0)
-    #     v_mag = random.uniform(0.5, 1.0)
+    # s_mag = random.uniform(0.5, 1.0)
+    # v_mag = random.uniform(0.5, 1.0)
 
-    #     img_hsv2[:,:,(1)] = img_hsv2[:,:,(1)] * s_mag
-    #     img_hsv2[:,:,(2)] = img_hsv2[:,:,(2)] * v_mag
+    # img_hsv2[:,:,(1)] = img_hsv2[:,:,(1)] * s_mag
+    # img_hsv2[:,:,(2)] = img_hsv2[:,:,(2)] * v_mag
 
-    #     frame2 = cv2.cvtColor(img_hsv2, cv2.COLOR_HSV2BGR)
+    # frame2 = cv2.cvtColor(img_hsv2, cv2.COLOR_HSV2BGR)
 
     # 元画像にマスクをかける。
     clip_img = frame2 * mask_img
 
     minx = cx - 0.5 * w
     miny = cy - 0.5 * h
-    # ((minx, miny), (w, h), th) = cv2.minAreaRect(contour)
 
     rows, cols = frame.shape[:2]
 
@@ -417,19 +396,13 @@ def showVideo(frame):
 
     # mg < cx + dx < cols - w
 
-    # center = (minx + 0.5 * w, miny + 0.5 * h)
 
-    # 0 <= theta_deg - angle <= 90
-    # theta_deg - 90 <= angle <= theta_deg
-    # angle = random.uniform(theta_deg - 90, theta_deg)
-
-    # -44 <= theta_deg - angle <= 44
-    # theta_deg - 44 <= angle <= theta_deg + 44
+    # 乱数で回転量を決める。
     angle = random.uniform(theta_deg - 44, theta_deg + 44)
     assert(-44 <= theta_deg - angle and theta_deg - angle <= 44)
 
     # 回転とスケール
-    m1 = cv2.getRotationMatrix2D(center, angle , scale)
+    m1 = cv2.getRotationMatrix2D(center, angle, scale)
     m1 = np.concatenate((m1, np.array([[0.0, 0.0, 1.0]])))
 
     # 平行移動
@@ -469,8 +442,13 @@ def showVideo(frame):
     xmin, ymin, xmax, ymax = ( x1, y1, x1 + w1, y1 + h1 )
 
     # 矩形を描く。
-    showRot(dst_img2 , cx + dx, cy + dy, w, h, theta_deg - angle, '-image31-')
-    bbox, corners = showRot(compo_img.copy(), cx + dx, cy + dy, w, h, theta_deg - angle, '-image32-')
+    bbox, corners_org, corners_rot = showRot(dst_img2 , cx + dx, cy + dy, w, h, theta_deg - angle)
+
+    draw_auxiliary_line(dst_img2, cx + dx, cy + dy, corners_org, corners_rot)
+
+    show_image('-image22-', dst_img2)
+
+    show_image('-image23-', compo_img)
 
     if csvFile is not None:
 
@@ -496,7 +474,7 @@ def showVideo(frame):
             "image_id" : image_id, 
             "category_id" : classIdx + 1,
             "bbox" : bbox ,  # all floats
-            "segmentation" : corners.tolist(),
+            "segmentation" : corners_rot.tolist(),
             "area": bbox[2] * bbox[3],           # w * h. Required for validation scores
             "iscrowd": 0            # Required for validation scores            
         })
@@ -531,35 +509,6 @@ def get_tree_data(video_dir):
 
     return treedata
 
-def colorBar():
-    width = 80
-    height = 18
-
-    hsv = np.zeros((height, width, 3), dtype=np.uint8)
-    for HSV in [ 'H', 'S', 'V' ]:
-        for y in range(height):
-            for x in range(width):
-                if   HSV == 'H':
-                    hue = H_lo + (H_hi - H_lo) * x / width
-                    if RedBG:
-                        hue = (hue + 90) % 180
-                    hsv[y, x, 0] = hue
-                    hsv[y, x, 1] = 255
-                    hsv[y, x, 2] = 255
-                else:
-                    hsv[y, x, 0] = (H_lo + H_hi) / 2
-                    if HSV == 'S':
-                        hsv[y, x, 1] = S_lo + (S_hi - S_lo) * x / width
-                        hsv[y, x, 2] = 255
-                    elif HSV == 'V':                
-                        hsv[y, x, 1] = (S_lo + S_hi) / 2
-                        hsv[y, x, 2] = V_lo + (V_hi - V_lo) * x / width
-
-        rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-        img_pil = Image.fromarray(rgb, mode='RGB')
-
-        hbar_img = ImageTk.PhotoImage(image=img_pil)
-        window[f'-{HSV}bar-'].update(data=hbar_img)
      
 def spin(label, key, val, min_val, max_val):
     return [ 
@@ -602,20 +551,6 @@ def showImgPos():
 if __name__ == '__main__':
     print(cv2.getBuildInformation())
 
-    # 色のテーブルを作る。
-    colors = []
-    for r in [ 255, 0 ]:
-        for g in [ 255, 0]:
-            for b in [ 255, 0 ]:
-                colors.append((r, g, b))
-
-    colors = colors[1:] + colors[:1]       
-
-
-    # cv2.namedWindow(window_name)
-    # for name , val in zip([ 'H lo', 'H hi', 'S lo', 'S hi', 'V lo', 'V hi',  ], [ H_lo, H_hi, S_lo, S_hi, V_lo, V_hi ]):
-    #     cv2.createTrackbar(name, window_name, val, 255, printing)    
-
     video_dir = sys.argv[1]
     bg_img_dir = sys.argv[2]
 
@@ -647,30 +582,26 @@ if __name__ == '__main__':
                 enable_events=True),
             sg.Column([
                 [ sg.Image(filename='', size=(256,256), key='-image11-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image21-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image31-') ]
+                [ sg.Image(filename='', size=(256,256), key='-image21-') ]
             ])
             ,
             sg.Column([
                 [ sg.Image(filename='', size=(256,256), key='-image12-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image22-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image32-') ]
+                [ sg.Image(filename='', size=(256,256), key='-image22-') ]
             ])
             ,
             sg.Column([
                 [ sg.Image(filename='', size=(256,256), key='-image13-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image23-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image33-') ]
+                [ sg.Image(filename='', size=(256,256), key='-image23-') ]
             ])
         ]
         ,
         [ sg.Slider(range=(0,100), default_value=0, size=(100,15), orientation='horizontal', change_submits=True, key='-img-pos-') ]
         ,
-        spin('H lo', '-Hlo-', H_lo, 0, 180) + spin('H hi', '-Hhi-', H_hi, 0, 180) + [ sg.Image(filename='', key='-Hbar-'), sg.Checkbox('赤背景', default=RedBG, key='-RedBG-', enable_events=True) ],
-        spin('S lo', '-Slo-', S_lo, 0, 255) + spin('S hi', '-Shi-', S_hi, 0, 255) + [ sg.Image(filename='', key='-Sbar-') ],
-        spin('V lo', '-Vlo-', V_lo, 0, 255) + spin('V hi', '-Vhi-', V_hi, 0, 255) + [ sg.Image(filename='', key='-Vbar-') ],
+        [ sg.Input(str(data_size), key='-data-size-', size=(6,1)) ]
+        ,
+        spin('V lo', '-Vlo-', V_lo, 0, 255),
         spin('S mag', '-S_mag-', 100, 10, 200) + spin('V mag', '-V_mag-', 100, 10, 200),
-        [sg.Text('Enter something on Row 2'), sg.InputText()],
         [ sg.Button('Play', key='-play/pause-'), sg.Button('Save', key='-save-'), sg.Button('Save All', key='-save-all-'), sg.Button('Close')] ]
 
     # Create the Window
@@ -683,14 +614,9 @@ if __name__ == '__main__':
 
 
     cap = None
-    is_first = True
     while True:
         # event, values = window.read()
         event, values = window.read(timeout=1)
-
-        if is_first:
-            is_first = False
-            colorBar()
 
         if event == sg.WIN_CLOSED or event == 'Close': # if user closes window or clicks cancel
             break
@@ -712,24 +638,8 @@ if __name__ == '__main__':
 
                 cap = initCap()
 
-        elif event == '-Hlo-':
-            H_lo = int(values[event])
-            colorBar()
-        elif event == '-Hhi-':
-            H_hi = int(values[event])
-            colorBar()
-        elif event == '-Slo-':
-            S_lo = int(values[event])
-            colorBar()
-        elif event == '-Shi-':
-            S_hi = int(values[event])
-            colorBar()
         elif event == '-Vlo-':
             V_lo = int(values[event])
-            colorBar()
-        elif event == '-Vhi-':
-            V_hi = int(values[event])
-            colorBar()
 
         elif event == '-S_mag-':
             S_mag = int(values[event])
@@ -750,6 +660,7 @@ if __name__ == '__main__':
             setPlaying(not playing)
 
         elif event == '-save-':
+            data_size = int(values['-data-size-'])
             class_dir = values['-tree-'][0]
             print("save video dir", class_dir)
             v = [ (i, c) for i, c in enumerate(imageClasses) if class_dir == c.classDir ]
@@ -763,16 +674,13 @@ if __name__ == '__main__':
             saveImgs()
 
         elif event == '-save-all-':
+            data_size = int(values['-data-size-'])
             classIdx = 0;
             saveAll = True
             isSaving = True
             AnnoObj = initJson(imageClasses)
 
             saveImgs()
-
-        elif event == '-RedBG-':
-            RedBG = window[event].get()
-            colorBar()
 
         else:
 
