@@ -138,3 +138,4 @@ infer/*.onnx
 infer/*.bin
 infer/*.xml
 infer/*.mapping
+.vscode/launch.json
