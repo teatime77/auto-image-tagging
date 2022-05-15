@@ -154,7 +154,7 @@ def showRot(img, cx, cy, w, h, theta_deg):
     corners_org = np.array([ [ min_x, min_y ], [ min_x + w, min_y ], [ min_x + w, min_y + h ], [ min_x, min_y + h ]  ])
 
     # 矩形の中心のXY座標
-    centre = np.array([cx, cy])
+    center = np.array([cx, cy])
 
     theta = - math.radians(theta_deg)
 
@@ -163,7 +163,7 @@ def showRot(img, cx, cy, w, h, theta_deg):
                           [ np.sin(theta),  np.cos(theta) ] ])
 
     # 矩形の中心が原点(0,0)に来るように平行移動してから、回転をして、元の位置に平行移動する。
-    corners_rot = np.matmul(corners_org - centre, rotation) + centre
+    corners_rot = np.matmul(corners_org - center, rotation) + center
 
     corners_rot = np.int0(corners_rot)
 
@@ -186,6 +186,47 @@ def showRot(img, cx, cy, w, h, theta_deg):
 
     return (bbox, corners_org, corners_rot)
 
+def box_slope(box):
+    rad45 = math.radians(45)
+
+    for i1 in range(4):
+        i2 = (i1 + 1) % 4
+
+        dx = box[i2][0] - box[i1][0]
+        dy = box[i2][1] - box[i1][1]
+
+        theta = math.atan2(dy, dx)
+        if abs(theta) <= rad45:
+            box2 = []
+            for j in range(4):
+                k = (i1 + j) % 4
+                box2.append(box[k])
+            return theta, box2
+
+    return None
+
+def warp_box(box, M):
+    box2 = []
+    for p in box:
+        v1 = np.array([p[0], p[1], 1])
+        v2 = np.dot(M, v1)
+
+        box2.append( np.array([v2[0], v2[1]])  )
+
+    return box2
+
+
+def rotate_box(box, theta):
+
+    center = np.mean(np.array(box), 0)
+
+    rot = np.array([[np.cos(theta), -np.sin(theta)],
+                    [np.sin(theta),  np.cos(theta)]])
+
+    return [ np.dot(rot, np.array(v) - center) + center for v in box ]
+
+
+
 def showContours(frame, bin_img, contours, hierarchy, idx, nest):
     contour = contours[idx]
 
@@ -201,7 +242,7 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
     ratio = 100 * np.sqrt(area) / np.sqrt(img_area)
 
     if ratio < 40:
-        return 8 * [None]
+        return 9 * [None]
 
     # 輪郭のモーメントを計算する。
     M = cv2.moments(contour)
@@ -217,7 +258,7 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
         pass
     else:
         print("%s %d [%d, %d, %d, %d] area:%.1f c(%d, %d)" % (' ' * (nest * 4), idx, hierarchy[0][idx][Next_Sibling], hierarchy[0][idx][Previous_Sibling], hierarchy[0][idx][First_Child], hierarchy[0][idx][Parent], ratio, rx, ry))
-        return 8 * [None]
+        return 9 * [None]
 
     conts = [ contour ]
 
@@ -244,6 +285,9 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
 
     # 回転を考慮した外接矩形を得る。
     rect = cv2.minAreaRect(contour)
+    box = cv2.boxPoints(rect)
+
+    cv2.drawContours(clip_img, [ np.int0(box) ], 0, (0,255,0), 2)
 
     # 矩形の中心、サイズ、回転角を得る。
     ((cx, cy), (w, h), theta_deg) = rect
@@ -252,21 +296,21 @@ def showContours(frame, bin_img, contours, hierarchy, idx, nest):
         w, h = h, w
         theta_deg -= 90
 
-    bbox, corners_org, corners_rot = showRot(clip_img, cx, cy, w, h, theta_deg)
+    # bbox, corners_org, corners_rot = showRot(clip_img, cx, cy, w, h, theta_deg)
 
-    draw_auxiliary_line(clip_img, cx, cy, corners_org, corners_rot)
+    # draw_auxiliary_line(clip_img, cx, cy, corners_org, corners_rot)
 
     show_image('-image21-', clip_img)
 
-    return contour, mask_img, edge_img, cx, cy, w, h, theta_deg
+    return contour, mask_img, edge_img, box, cx, cy, w, h, theta_deg
 
 def _corners2rotatedbbox(corners):
     corners = np.array(corners)
-    centre = np.mean(np.array(corners), 0)
+    center = np.mean(np.array(corners), 0)
     theta = calc_bearing(corners[0], corners[1])
     rotation = np.array([[np.cos(theta), -np.sin(theta)],
                          [np.sin(theta), np.cos(theta)]])
-    out_points = np.matmul(corners - centre, rotation) + centre
+    out_points = np.matmul(corners - center, rotation) + center
     x, y = list(out_points[0,:])
     w, h = list(out_points[2, :] - out_points[0, :])
     return [x, y, w, h, theta]
@@ -350,7 +394,7 @@ def showVideo(frame):
         if hierarchy[0][idx][Parent] == -1:
             # トップレベルの場合
 
-            contour, mask_img, edge_img, cx, cy, w, h, theta_deg = showContours(frame, bin_img, contours, hierarchy, idx, 0)
+            contour, mask_img, edge_img, box, cx, cy, w, h, theta_deg = showContours(frame, bin_img, contours, hierarchy, idx, 0)
             if contour is not None:
                 break
 
@@ -398,8 +442,8 @@ def showVideo(frame):
 
 
     # 乱数で回転量を決める。
-    angle = random.uniform(theta_deg - 44, theta_deg + 44)
-    assert(-44 <= theta_deg - angle and theta_deg - angle <= 44)
+    angle = random.uniform(-180, 180)
+    # print('rot', math.degrees(angle))
 
     # 回転とスケール
     m1 = cv2.getRotationMatrix2D(center, angle, scale)
@@ -435,16 +479,37 @@ def showVideo(frame):
     blend_img = cv2.addWeighted(bg_img, 0.7, warp_img, 0.3, 0.0)
     compo_img = np.where(edge_img2 == 0, compo_img, blend_img)
 
-    mask_img3 = cv2.cvtColor(mask_img2, cv2.COLOR_BGR2GRAY).astype(np.uint8)
-    x1, y1, w1, h1 = cv2.boundingRect(mask_img3)
 
-    # 矩形の左上と右下の座標
-    xmin, ymin, xmax, ymax = ( x1, y1, x1 + w1, y1 + h1 )
+    box_rot = warp_box(box, M)
+
+    slope, box_rot = box_slope(box_rot)
+    if slope is None:
+        print('slope is None')
+        
+        return
+
+    rect_box = rotate_box(box_rot, -slope)
+
+    x, y = rect_box[0]
+    w, h = list(rect_box[2] - rect_box[0])
+
+    if True:
+
+        bbox = _corners2rotatedbbox(box_rot)
+        x, y, w, h, theta = bbox
+        cv2.rectangle(dst_img2, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
+    else:
+        bbox = [ x, y, w, h, slope ]
+        cv2.drawContours(dst_img2, [ np.int0(rect_box) ], 0, (0,0,255), 2)
+
+    cv2.drawContours(dst_img2, [ np.int0(box_rot)  ], 0, (0,255,0), 2)
+
+    cv2.circle(dst_img2, (int(x), int(y)), 10, (255,255,255), -1)
 
     # 矩形を描く。
-    bbox, corners_org, corners_rot = showRot(dst_img2 , cx + dx, cy + dy, w, h, theta_deg - angle)
+    # bbox, corners_org, corners_rot = showRot(dst_img2 , cx + dx, cy + dy, w, h, theta_deg - angle)
 
-    draw_auxiliary_line(dst_img2, cx + dx, cy + dy, corners_org, corners_rot)
+    # draw_auxiliary_line(dst_img2, cx + dx, cy + dy, corners_org, corners_rot)
 
     show_image('-image22-', dst_img2)
 
@@ -459,7 +524,7 @@ def showVideo(frame):
         cv2.imwrite(test_img_path, compo_img)
 
         file_name = os.path.basename(test_img_path)
-        csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax},{classIdx+1}\n')
+        # csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax},{classIdx+1}\n')
 
         AnnoObj["images"].append({
             "id" : image_id,
@@ -474,7 +539,7 @@ def showVideo(frame):
             "image_id" : image_id, 
             "category_id" : classIdx + 1,
             "bbox" : bbox ,  # all floats
-            "segmentation" : corners_rot.tolist(),
+            "segmentation" : [ [p[0], p[1]] for p in box_rot ] ,
             "area": bbox[2] * bbox[3],           # w * h. Required for validation scores
             "iscrowd": 0            # Required for validation scores            
         })
