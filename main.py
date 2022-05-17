@@ -1,26 +1,20 @@
 import os
-import math
-import glob
-from PySimpleGUI.PySimpleGUI import Button, Column
-import cv2
 import sys
+import math
+import random
+import glob
+import cv2
 import numpy as np
-from operator import itemgetter
 import PySimpleGUI as sg
 from PIL import Image, ImageTk
-import random
-import time
-import json
-from odtk import _corners2rotatedbbox
+from odtk import _corners2rotatedbbox, ODTK
+from yolo_v5 import YOLOv5
 
 Next_Sibling, Previous_Sibling, First_Child, Parent = (0, 1, 2, 3)
 
 data_size = 3000
 playing = False
-saveAll = False
-isSaving = False
-csvFile = None
-AnnoObj = None
+network = None
 
 classIdx = 0
 imageClasses = []
@@ -46,10 +40,12 @@ class ImageClass:
 
 
 def initCap():
-    global saveVideoIdx
+    global VideoIdx
 
-    video_path = imageClasses[classIdx].videoPathes[saveVideoIdx]
+    # 動画ファイルのパス
+    video_path = imageClasses[classIdx].videoPathes[VideoIdx]
 
+    # 動画のキャプチャー オブジェクト
     cap = cv2.VideoCapture(video_path)    
 
     if not cap.isOpened():
@@ -80,67 +76,68 @@ def show_image(key, img):
     window[key].update(data=image_tk, size=(256,256))
 
 def stopSave():
-    global saveVideoIdx, csvFile, classIdx
+    global VideoIdx, classIdx, network
 
-    saveVideoIdx = 0
+    network.save()
+
+    VideoIdx = 0
     classIdx = 0
-
-    if csvFile is not None:
-        csvFile.close()
-        csvFile = None
-
-        with open(f'{output_dir}/train.json', 'w') as f:
-            json.dump(AnnoObj, f, indent=4)
+    network = None
 
     setPlaying(False)
     # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
 def readCap():
-    global cap, saveVideoIdx, csvFile, classIdx
+    global cap, VideoIdx, classIdx
 
     ret, frame = cap.read()
     if ret:
+        # 画像が取得できた場合
 
         pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
         window['-img-pos-'].update(value=pos)
 
         showVideo(frame)
 
-        if AnnoObj is not None:
-            images_len = len(AnnoObj["images"])
+        if network is not None:
+            # 保存中の場合
 
-            if data_size <= images_len:
+            # 取得画像枚数
+            images_cnt = network.images_cnt()
+
+            window['-images-cnt-'].update(f'  {images_cnt}枚')
+
+            if data_size <= images_cnt:
 
                 cap.release()
                 stopSave()
                 print("保存終了")
 
-            elif images_len % 10 == 0:
-                print("images len", images_len)
-
     else:
+        # 動画の終わりの場合
 
-        saveVideoIdx += 1
+        # 動画のインデックスをカウントアップ
+        VideoIdx += 1
 
+        # キャプチャー オブジェクトを解放する。
         cap.release()
 
-        if saveVideoIdx < len(imageClasses[classIdx].videoPathes):
+        if VideoIdx < len(imageClasses[classIdx].videoPathes):
             # 同じクラスの別の動画ファイルがある場合
 
             cap = initCap()
         else:
             # 同じクラスの別の動画ファイルがない場合
 
+            # 次のクラスのインデックス
             classIdx = (classIdx + 1) % len(imageClasses)
-            saveVideoIdx = 0
 
-            if not saveAll or data_size < len(AnnoObj["images"]):
+            # 動画のインデックス
+            VideoIdx = 0
 
-                stopSave()
+            cap = initCap()
 
-            else:
 
-                cap = initCap()
         
 
 def box_slope(box):
@@ -224,25 +221,6 @@ def getContour(bin_img):
                 return contour, contour_family
 
     return None, None
-
-
-def initJson(image_classes):
-    jobj = {
-        "annotations":[],
-        "images":[],
-        "categories":[]
-    }
-
-    for i, img_class in enumerate(image_classes):
-        o = {
-            "supercategory": f'super-{img_class.name}',
-            "id": i + 1,
-            "name": img_class.name
-        }
-
-        jobj["categories"].append(o)
-
-    return jobj;
 
 def showVideo(frame):
     global bgImgPaths, bgImgIdx
@@ -373,21 +351,21 @@ def showVideo(frame):
     blend_img = cv2.addWeighted(bg_img, 0.7, warp_img, 0.3, 0.0)
     compo_img = np.where(edge_img2 == 0, compo_img, blend_img)
 
-    box_rot = warp_box(box, M)
+    corners2 = warp_box(box, M)
 
-    box_rot = box_slope(box_rot)
-    if box_rot is None:
+    corners2 = box_slope(corners2)
+    if corners2 is None:
         print('slope is None')
         
         return
 
-    bbox = _corners2rotatedbbox(box_rot)
+    bbox = _corners2rotatedbbox(corners2)
     x, y, w, h, theta = bbox
 
     cv2.rectangle(dst_img2, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
 
 
-    cv2.drawContours(dst_img2, [ np.int0(box_rot)  ], 0, (0,255,0), 2)
+    cv2.drawContours(dst_img2, [ np.int0(corners2)  ], 0, (0,255,0), 2)
 
     cv2.circle(dst_img2, (int(x), int(y)), 10, (255,255,255), -1)
 
@@ -396,34 +374,13 @@ def showVideo(frame):
 
     show_image('-image23-', compo_img)
 
-    if csvFile is not None:
-
-        image_id = len(AnnoObj["images"]) + 1
+    if network is not None:
 
         pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
-        test_img_path = f'{output_dir}/img/{classIdx}-{saveVideoIdx}-{pos}-{image_id}.png'
-        cv2.imwrite(test_img_path, compo_img)
 
-        file_name = os.path.basename(test_img_path)
-        # csvFile.write(f'{file_name},{xmin},{ymin},{xmax},{ymax},{classIdx+1}\n')
+        network.add_image(classIdx, VideoIdx, pos, compo_img, corners2, bbox)
 
-        AnnoObj["images"].append({
-            "id" : image_id,
-            "width": width,
-            "height": height,
-            "file_name" : file_name            
-        })
 
-        anno_id = len(AnnoObj["annotations"]) + 1
-        AnnoObj["annotations"].append({
-            "id" : anno_id,
-            "image_id" : image_id, 
-            "category_id" : classIdx + 1,
-            "bbox" : bbox ,  # all floats
-            "segmentation" : box_rot, # [ [p[0], p[1]] for p in box_rot ] ,
-            "area": bbox[2] * bbox[3],           # w * h. Required for validation scores
-            "iscrowd": 0            # Required for validation scores            
-        })
 
 def get_tree_data(video_dir):
     global video_pathes, imageClasses
@@ -474,23 +431,19 @@ def setPlaying(is_playing):
         print('show play')
 
 def saveImgs():
-    global cap, saveVideoIdx, csvFile, classIdx
+    global cap, VideoIdx, classIdx
 
-    saveVideoIdx = 0
+    VideoIdx = 0
 
     for img_path in glob.glob(f'{output_dir}/img/*.png'):
         print(f'削除:{img_path}')
         os.remove(img_path)
-
-    csvFile = open(f'{output_dir}/target.csv', 'w')
-    csvFile.write('image,xmin,ymin,xmax,ymax,label\n')
 
     cap = initCap()
 
 def showImgPos():
     if cap is not None:
         pos = int(values['-img-pos-'])
-        print(f'再生位置:{pos}')
         cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
         readCap()
 
@@ -502,7 +455,6 @@ if __name__ == '__main__':
 
     output_dir = sys.argv[3]
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(f'{output_dir}/img', exist_ok=True)
 
 
     bgImgPaths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
@@ -544,11 +496,11 @@ if __name__ == '__main__':
         ,
         [ sg.Slider(range=(0,100), default_value=0, size=(100,15), orientation='horizontal', change_submits=True, key='-img-pos-') ]
         ,
-        [ sg.Input(str(data_size), key='-data-size-', size=(6,1)) ]
+        [ sg.Input(str(data_size), key='-data-size-', size=(6,1)), sg.Text('', size=(6,1), key='-images-cnt-') ]
         ,
         spin('V lo', '-Vlo-', V_lo, 0, 255),
-        spin('S mag', '-S_mag-', 100, 10, 200) + spin('V mag', '-V_mag-', 100, 10, 200),
-        [ sg.Button('Play', key='-play/pause-'), sg.Button('Save', key='-save-'), sg.Button('Save All', key='-save-all-'), sg.Button('Close')] ]
+        spin('S mag', '-S_mag-', 100, 10, 200) + spin('V mag', '-V_mag-', 100, 10, 200) + [ sg.Text('network', size=(6,1)), sg.Combo(['ODTK', 'YOLOv5'], default_value = 'YOLOv5', key='-network-') ],
+        [ sg.Button('Play', key='-play/pause-'), sg.Button('Save All', key='-save-all-'), sg.Button('Close')] ]
 
     # Create the Window
     window = sg.Window('Window Title', layout)
@@ -580,7 +532,7 @@ if __name__ == '__main__':
 
                 classIdx = v[0][0]
                 img_class = v[0][1]
-                saveVideoIdx = img_class.videoPathes.index(video_path)
+                VideoIdx = img_class.videoPathes.index(video_path)
 
                 cap = initCap()
 
@@ -605,26 +557,14 @@ if __name__ == '__main__':
         elif event == '-play/pause-':
             setPlaying(not playing)
 
-        elif event == '-save-':
-            data_size = int(values['-data-size-'])
-            class_dir = values['-tree-'][0]
-            print("save video dir", class_dir)
-            v = [ (i, c) for i, c in enumerate(imageClasses) if class_dir == c.classDir ]
-            assert len(v) == 1
-
-            classIdx = v[0][0]
-            saveAll = False
-            isSaving = True
-            AnnoObj = initJson([ imageClasses[classIdx] ])
-
-            saveImgs()
-
         elif event == '-save-all-':
             data_size = int(values['-data-size-'])
-            classIdx = 0;
-            saveAll = True
-            isSaving = True
-            AnnoObj = initJson(imageClasses)
+            classIdx = 0
+
+            if values['-network-'] == 'ODTK':
+                network = ODTK(output_dir, imageClasses)
+            else:
+                network = YOLOv5(output_dir, imageClasses)
 
             saveImgs()
 
@@ -633,6 +573,3 @@ if __name__ == '__main__':
             print('You entered ', event)
 
     window.close()
-
-    if csvFile is not None:
-        csvFile.close()

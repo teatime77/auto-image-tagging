@@ -1,5 +1,66 @@
+import os
 import math
 import numpy as np
+import json
+import cv2
+
+class ODTK:
+    def __init__(self, output_dir, image_classes):
+        self.output_dir = output_dir
+
+        os.makedirs(f'{output_dir}/img', exist_ok=True)
+
+        self.AnnoObj = {
+            "annotations":[],
+            "images":[],
+            "categories":[]
+        }
+
+        for i, img_class in enumerate(image_classes):
+            o = {
+                "supercategory": f'super-{img_class.name}',
+                "id": i + 1,
+                "name": img_class.name
+            }
+
+            self.AnnoObj["categories"].append(o)
+
+    def images_cnt(self):
+        return len(self.AnnoObj["images"])
+
+    def add_image(self, class_idx, video_idx, pos, compo_img, corners2, bbox):
+        height, width = compo_img.shape[:2]
+
+        image_id = len(self.AnnoObj["images"]) + 1
+
+        file_name = f'{class_idx}-{video_idx}-{pos}-{image_id}.png'
+
+        img_path = f'{self.output_dir}/img/{file_name}'
+        cv2.imwrite(img_path, compo_img)
+
+        self.AnnoObj["images"].append({
+            "id" : image_id,
+            "width": width,
+            "height": height,
+            "file_name" : file_name            
+        })
+
+        anno_id = len(self.AnnoObj["annotations"]) + 1
+        self.AnnoObj["annotations"].append({
+            "id" : anno_id,
+            "image_id" : image_id, 
+            "category_id" : class_idx + 1,
+            "bbox" : bbox ,
+            "segmentation" : corners2,
+            "area": bbox[2] * bbox[3],           # w * h. Required for validation scores
+            "iscrowd": 0            # Required for validation scores            
+        })
+
+
+    def save(self):
+        with open(f'{self.output_dir}/train.json', 'w') as f:
+            json.dump(self.AnnoObj, f, indent=4)
+
 
 
 # how to define theta
