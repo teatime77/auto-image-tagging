@@ -9,8 +9,7 @@ import PySimpleGUI as sg
 from PIL import Image, ImageTk
 from odtk import _corners2rotatedbbox, ODTK
 from yolo_v5 import YOLOv5
-
-Next_Sibling, Previous_Sibling, First_Child, Parent = (0, 1, 2, 3)
+from util import spin, show_image, getContour
 
 data_size = 3000
 playing = False
@@ -60,20 +59,6 @@ def initCap():
     setPlaying(True)
 
     return cap
-
-def show_image(key, img):
-    img = cv2.resize(img, dsize=(256, 256))       
-
-    if len(img.shape) == 3:
-        image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # imreadはBGRなのでRGBに変換
-        # print('image_rgb:type', type(image_rgb), image_rgb.shape, image_rgb.dtype)
-        image_pil = Image.fromarray(image_rgb) # RGBからPILフォーマットへ変換
-    else:
-        image_pil = Image.fromarray(img) # RGBからPILフォーマットへ変換
-
-    image_tk  = ImageTk.PhotoImage(image_pil) # ImageTkフォーマットへ変換
-
-    window[key].update(data=image_tk, size=(256,256))
 
 def stopSave():
     global VideoIdx, classIdx, network
@@ -162,91 +147,24 @@ def warp_box(box, M):
 
 
 
-def isObject(shape, contour):
-    # 二値画像の幅と高さ
-    width, height = shape[:2]
-
-    # 二値画像の面積
-    img_area = width * height
-
-    # 輪郭の面積
-    area = cv2.contourArea(contour)
-    ratio = 100 * np.sqrt(area) / np.sqrt(img_area)
-
-    if ratio < 40:
-        return False
-
-    # 輪郭のモーメントを計算する。
-    M = cv2.moments(contour)
-
-    # モーメントから重心のXY座標を計算す。
-    cx = int(M['m10']/M['m00'])
-    cy = int(M['m01']/M['m00'])
-
-    rx = int(100 * cx / width)
-    ry = int(100 * cy / height)
-
-    return 35 <= rx and rx <= 65 and 35 <= ry and ry <= 65
-
-def contour_children(contours, hierarchy, idx):
-    children = []
-
-    # 最初の子
-    i = hierarchy[0][idx][First_Child]
-    while i != -1:
-        c = contours[i]
-        children.append(c)
-
-        # 次の兄弟
-        i = hierarchy[0][i][Next_Sibling]
-
-    return children
-
-
-def getContour(bin_img):
-    # 二値化画像から輪郭のリストを得る。
-    contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)   # RETR_EXTERNAL  RETR_CCOMP 
-
-    assert(len(hierarchy.shape) == 3 and hierarchy.shape[0] == 1 and hierarchy.shape[2] == 4)
-    assert(len(contours) == hierarchy.shape[1])
-
-    for idx, _ in enumerate(contours):
-        if hierarchy[0][idx][Parent] == -1:
-            # トップレベルの場合
-
-            contour = contours[idx]
-            if isObject(bin_img.shape, contour):
-
-                contour_family = [ contour ] + contour_children(contours, hierarchy, idx)
-                return contour, contour_family
-
-    return None, None
 
 def showVideo(frame):
     global bgImgPaths, bgImgIdx
 
     # 原画を表示する。
-    show_image('-image11-', frame)
+    show_image(window['-image11-'], frame)
 
     # グレー画像を表示する。
     gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-    show_image('-image12-', gray_img)
+    show_image(window['-image12-'], gray_img)
 
     # 二値画像を表示する。
     bin_img = 255 - cv2.inRange(gray_img, V_lo, V_hi)
-    show_image('-image13-', bin_img)
+    show_image(window['-image13-'], bin_img)
 
-    contour, contour_family = getContour(bin_img)
+    contour, contour_family, mask_img, edge_img = getContour(bin_img)
     if contour is None:
         return
-
-    # 輪郭から0と1の二値の内部のマスク画像を作る。
-    mask_img = np.zeros(frame.shape, dtype=np.uint8)
-    cv2.drawContours(mask_img, contour_family, -1, (1,1,1), -1)
-
-    # 輪郭から0と1の二値の縁のマスク画像を作る。
-    edge_img = np.zeros(frame.shape, dtype=np.uint8)
-    cv2.drawContours(edge_img, contour_family, -1, (1,1,1), 5)
 
     clip_img = frame * mask_img
 
@@ -260,7 +178,7 @@ def showVideo(frame):
     cv2.drawContours(clip_img, [ np.int0(box) ], 0, (0,255,0), 2)
 
 
-    show_image('-image21-', clip_img)
+    show_image(window['-image21-'], clip_img)
 
 
     frame2 = frame.copy()
@@ -370,9 +288,9 @@ def showVideo(frame):
     cv2.circle(dst_img2, (int(x), int(y)), 10, (255,255,255), -1)
 
 
-    show_image('-image22-', dst_img2)
+    show_image(window['-image22-'], dst_img2)
 
-    show_image('-image23-', compo_img)
+    show_image(window['-image23-'], compo_img)
 
     if network is not None:
 
@@ -412,12 +330,6 @@ def get_tree_data(video_dir):
 
     return treedata
 
-     
-def spin(label, key, val, min_val, max_val):
-    return [ 
-        sg.Text(label, size=(6,1)), sg.Text("", size=(6,1)), 
-        sg.Spin(list(range(min_val, max_val + 1)), initial_value=val, size=(10, 1), key=key, enable_events=True )
-    ]
 
 def setPlaying(is_playing):
     global playing

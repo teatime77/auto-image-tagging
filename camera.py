@@ -1,14 +1,9 @@
 import cv2
 import PySimpleGUI as sg
 from PIL import Image, ImageTk
+from util import spin, show_image, getContour
 
 V_lo = 253
-
-def spin(label, key, val, min_val, max_val):
-    return [ 
-        sg.Text(label, size=(6,1)), sg.Text("", size=(6,1)), 
-        sg.Spin(list(range(min_val, max_val + 1)), initial_value=val, size=(10, 1), key=key, enable_events=True )
-    ]
 
 def readCap():
     ret, frame = cap.read()
@@ -29,36 +24,31 @@ def readCap():
     # 画像を1フレーム分として書き込み
     writer.write(img)
 
-    show_image('-image11-', img)
+    show_image(window['-image11-'], img)
 
     # グレー画像を表示する。
     gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-    show_image('-image12-', gray_img)
+    show_image(window['-image12-'], gray_img)
 
-    gray_img2 = cv2.equalizeHist(gray_img)
-    show_image('-image13-', gray_img2)
+    # gray_img2 = cv2.equalizeHist(gray_img)
+    # show_image(window['-image13-'], gray_img2)
 
     # 二値画像を表示する。
     bin_img = 255 - cv2.inRange(gray_img, V_lo, 255)
-    show_image('-image22-', bin_img)
+    show_image(window['-image22-'], bin_img)
 
     # 二値画像を表示する。
-    bin_img = 255 - cv2.inRange(gray_img2, V_lo, 255)
-    show_image('-image23-', bin_img)
+    # bin_img2 = 255 - cv2.inRange(gray_img2, V_lo, 255)
+    # show_image(window['-image23-'], bin_img2)
 
-def show_image(key, img):
-    img = cv2.resize(img, dsize=(256, 256))       
+    contour, contour_family, mask_img, edge_img = getContour(bin_img)
+    if contour is None:
+        return
 
-    if len(img.shape) == 3:
-        image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # imreadはBGRなのでRGBに変換
-        # print('image_rgb:type', type(image_rgb), image_rgb.shape, image_rgb.dtype)
-        image_pil = Image.fromarray(image_rgb) # RGBからPILフォーマットへ変換
-    else:
-        image_pil = Image.fromarray(img) # RGBからPILフォーマットへ変換
+    clip_img = frame * mask_img
 
-    image_tk  = ImageTk.PhotoImage(image_pil) # ImageTkフォーマットへ変換
-
-    window[key].update(data=image_tk, size=(256,256))
+    # cv2.drawContours(clip_img, contour_family, -1, (255,0,0), 10)
+    show_image(window['-image21-'], clip_img)
 
 
 resolutions = [
