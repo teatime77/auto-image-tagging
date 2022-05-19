@@ -10,27 +10,28 @@ class YOLOv5:
         self.image_id = 0
         self.image_classes = image_classes
 
-        self.output_dir = output_dir
+        self.datasets_dir = f'{output_dir}/datasets'
+
+        if os.path.isdir(self.datasets_dir):
+            # フォルダがすでにある場合
+
+            # フォルダを削除する。
+            shutil.rmtree(self.datasets_dir)
 
 
-        images_train = f'{output_dir}/datasets/images/train'
-        images_val   = f'{output_dir}/datasets/images/val'  
-        labels_train = f'{output_dir}/datasets/labels/train'
-        labels_val   = f'{output_dir}/datasets/labels/val'  
+        images_train = f'{self.datasets_dir}/images/train'
+        images_val   = f'{self.datasets_dir}/images/val'  
+        labels_train = f'{self.datasets_dir}/labels/train'
+        labels_val   = f'{self.datasets_dir}/labels/val'  
 
         for dir_path in [ images_train, images_val, labels_train, labels_val ]:
-            if os.path.isdir(dir_path):
-                # フォルダがすでにある場合
-
-                # フォルダを削除する。
-                shutil.rmtree(dir_path)
 
             # フォルダを作る。
             os.makedirs(dir_path, exist_ok=True)
 
-        with open(f'yolo_v5.yaml', 'w') as f:
+        with open(f'{self.datasets_dir}/yolo_v5.yaml', 'w') as f:
             # データフォルダのパス
-            f.write(f'path: ./datasets\n')
+            f.write(f'path: .\n')
 
             # トレーニング用の画像ファイルの相対パス
             f.write(f'train: images/train\n')
@@ -47,23 +48,23 @@ class YOLOv5:
     def images_cnt(self):
         return self.image_id
 
-    def add_image(self, class_idx, video_idx, pos, compo_img, corners2, bbox):
+    def add_image(self, class_idx, video_idx, pos, compo_img, corners2, bounding_box):
         # 画像IDをカウントアップする。
         self.image_id += 1
 
         # 画像ファイルとラベルファイルの名前
         name = f'{class_idx}-{video_idx}-{pos}-{self.image_id}'
 
-        # 9/10をトレーニングに使い、1/10をバリデーションに使う。
-        is_train = ( random.uniform(0.0, 1.0) < 0.9 )
+        # 19/20をトレーニングに使い、1/20をバリデーションに使う。
+        is_train = ( random.uniform(0.0, 1.0) < 0.95 )
 
         train_val = 'train' if is_train else 'val'
 
         # 画像ファイルのパス
-        image_path = f'{self.output_dir}/datasets/images/{train_val}/{name}.jpg'
+        image_path = f'{self.datasets_dir}/images/{train_val}/{name}.jpg'
 
         # ラベルのパス
-        label_path = f'{self.output_dir}/datasets/labels/{train_val}/{name}.txt'
+        label_path = f'{self.datasets_dir}/labels/{train_val}/{name}.txt'
 
         # 画像ファイルに書く。
         cv2.imwrite(image_path, compo_img)
@@ -72,7 +73,7 @@ class YOLOv5:
         image_height, image_width = compo_img.shape[:2]
 
         # 物体の位置とサイズ
-        x, y, w, h, theta = bbox
+        x, y, w, h, theta = bounding_box
         
         # 物体の中心の位置
         x_center = (x + 0.5 * w) / float(image_width)

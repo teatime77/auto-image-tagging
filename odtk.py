@@ -28,7 +28,7 @@ class ODTK:
     def images_cnt(self):
         return len(self.AnnoObj["images"])
 
-    def add_image(self, class_idx, video_idx, pos, compo_img, corners2, bbox):
+    def add_image(self, class_idx, video_idx, pos, compo_img, corners2, bounding_box):
         height, width = compo_img.shape[:2]
 
         image_id = len(self.AnnoObj["images"]) + 1
@@ -50,9 +50,9 @@ class ODTK:
             "id" : anno_id,
             "image_id" : image_id, 
             "category_id" : class_idx + 1,
-            "bbox" : bbox ,
+            "bbox" : bounding_box ,
             "segmentation" : corners2,
-            "area": bbox[2] * bbox[3],           # w * h. Required for validation scores
+            "area": bounding_box[2] * bounding_box[3],           # w * h. Required for validation scores
             "iscrowd": 0            # Required for validation scores            
         })
 

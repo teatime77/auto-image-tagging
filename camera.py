@@ -1,9 +1,25 @@
+import os
+import datetime
 import cv2
 import PySimpleGUI as sg
 from PIL import Image, ImageTk
-from util import spin, show_image, getContour
+from util import spin, show_image, getContour, setPlaying
+import numpy as np
 
+playing = False
+writer  = None
 V_lo = 253
+
+def initWriter():
+    global writer
+
+    os.makedirs('capture', exist_ok=True)
+
+    now = datetime.datetime.now()
+
+    file_path = f'capture/{now.strftime("%Y-%m-%d-%H-%M-%S")}.mp4'
+
+    writer = cv2.VideoWriter(file_path, fmt, frame_rate, (img_size, img_size)) # ライター作成
 
 def readCap():
     ret, frame = cap.read()
@@ -21,31 +37,26 @@ def readCap():
 
     img = frame[s1:e1, s2:e2, :]
 
-    # 画像を1フレーム分として書き込み
-    writer.write(img)
-
     show_image(window['-image11-'], img)
 
     # グレー画像を表示する。
-    gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) 
     show_image(window['-image12-'], gray_img)
-
-    # gray_img2 = cv2.equalizeHist(gray_img)
-    # show_image(window['-image13-'], gray_img2)
 
     # 二値画像を表示する。
     bin_img = 255 - cv2.inRange(gray_img, V_lo, 255)
     show_image(window['-image22-'], bin_img)
 
-    # 二値画像を表示する。
-    # bin_img2 = 255 - cv2.inRange(gray_img2, V_lo, 255)
-    # show_image(window['-image23-'], bin_img2)
-
-    contour, contour_family, mask_img, edge_img = getContour(bin_img)
+    contour, mask_img, edge_img = getContour(bin_img)
     if contour is None:
         return
 
-    clip_img = frame * mask_img
+    white_img = np.full(img.shape, 255, dtype=np.uint8)
+    clip_img = np.where(mask_img == 0, white_img, img)
+
+    if writer is not None:
+        # 画像を1フレーム分として書き込み
+        writer.write(clip_img)
 
     # cv2.drawContours(clip_img, contour_family, -1, (255,0,0), 10)
     show_image(window['-image21-'], clip_img)
@@ -97,9 +108,6 @@ print('HEIGHT'    , HEIGHT)
 frame_rate = cap.get(cv2.CAP_PROP_FPS)
 
 fmt = cv2.VideoWriter_fourcc('m', 'p', '4', 'v') # ファイル形式(ここではmp4)
-writer = cv2.VideoWriter('./outtest.mp4', fmt, frame_rate, (img_size, img_size)) # ライター作成
-
-
 
 # ret_val , cap_for_exposure = cap.read()
 # cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
@@ -131,7 +139,7 @@ layout = [
     spin('exposure', '-exposure-', exposure, -20, 20),
     spin('contrast', '-contrast-', contrast,   0, 255)
     ,
-    [ sg.Button('Close') ]
+    [ sg.Button('Play', key='-play/pause-'), sg.Button('Close') ]
 ]
 
 window = sg.Window('Window Title', layout)
@@ -142,6 +150,16 @@ while True:
 
     if event == sg.WIN_CLOSED or event == 'Close':
         break
+
+    elif event == '-play/pause-':
+        playing = setPlaying(window, not playing)
+
+        if playing:
+            initWriter()
+
+        else:
+            writer.release()
+            writer = None
 
     elif event == '-Vlo-':
         V_lo = int(values[event])
@@ -164,5 +182,3 @@ while True:
 
 
 cap.release()
-
-writer.release() # ファイルを閉じる

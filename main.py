@@ -6,29 +6,26 @@ import glob
 import cv2
 import numpy as np
 import PySimpleGUI as sg
-from PIL import Image, ImageTk
 from odtk import _corners2rotatedbbox, ODTK
 from yolo_v5 import YOLOv5
-from util import spin, show_image, getContour
+from util import spin, show_image, getContour, edge_width, setPlaying
 
-data_size = 3000
+data_size = 5000
 playing = False
 network = None
+
+hue_shift = 15
+saturation_shift = 15
+value_shift = 15
 
 classIdx = 0
 imageClasses = []
 
-V_lo = 253
-V_hi = 255
+V_lo = 250
 
 S_mag =  100
 V_mag =  100
 
-dX = 0
-dY = 0
-dW = 0
-dH = 0
-dT = 0
 
 class ImageClass:
     def __init__(self, name, class_dir):
@@ -37,9 +34,8 @@ class ImageClass:
         self.videoPathes = []
 
 
-
 def initCap():
-    global VideoIdx
+    global VideoIdx, playing
 
     # 動画ファイルのパス
     video_path = imageClasses[classIdx].videoPathes[VideoIdx]
@@ -56,12 +52,12 @@ def initCap():
     window['-img-pos-'].update(value=0)
     print(f'再生開始 フレーム数:{cap.get(cv2.CAP_PROP_FRAME_COUNT)} {os.path.basename(video_path)}')
 
-    setPlaying(True)
+    playing = setPlaying(window, True)
 
     return cap
 
 def stopSave():
-    global VideoIdx, classIdx, network
+    global VideoIdx, classIdx, network, playing
 
     network.save()
 
@@ -69,7 +65,7 @@ def stopSave():
     classIdx = 0
     network = None
 
-    setPlaying(False)
+    playing = setPlaying(window, False)
     # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
 def readCap():
@@ -79,7 +75,10 @@ def readCap():
     if ret:
         # 画像が取得できた場合
 
+        # 動画の現在位置
         pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+
+        # 動画の現在位置の表示を更新する。
         window['-img-pos-'].update(value=pos)
 
         showVideo(frame)
@@ -123,9 +122,30 @@ def readCap():
             cap = initCap()
 
 
+def augment_color(img):
+    # コントラストと輝度を変える。
+    hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) 
+
+    for channel, shift in enumerate([hue_shift, saturation_shift, value_shift]):
+        if shift == 0:
+            continue
+
+        change = np.random.randint(-shift, shift)
+
+        if channel == 0:
+            data = hsv_img[:, :, channel].astype(np.int32)
+            data = (data + change + 180) % 180
+
+        else:
+            data  = hsv_img[:, :, channel].astype(np.float32)
+            data  = (data * ((100 + change) / 100.0) ).clip(0, 255)
+
+        hsv_img[:, :, channel] = data.astype(np.uint8)
+
+    return cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
         
 
-def box_slope(box):
+def rotate_corners(box):
     rad45 = math.radians(45)
 
     for i1 in range(4):
@@ -140,13 +160,6 @@ def box_slope(box):
 
     return None
 
-def warp_box(box, M):
-    return [ 
-        np.dot(M, np.array(p + [1])).tolist() for p in box.tolist()
-    ]
-
-
-
 
 def showVideo(frame):
     global bgImgPaths, bgImgIdx
@@ -159,47 +172,37 @@ def showVideo(frame):
     show_image(window['-image12-'], gray_img)
 
     # 二値画像を表示する。
-    bin_img = 255 - cv2.inRange(gray_img, V_lo, V_hi)
+    bin_img = 255 - cv2.inRange(gray_img, V_lo, 255)
     show_image(window['-image13-'], bin_img)
 
-    contour, contour_family, mask_img, edge_img = getContour(bin_img)
+    # 輪郭とマスク画像とエッジ画像を得る。
+    contour, mask_img, edge_img = getContour(bin_img)
     if contour is None:
         return
 
+    # 元画像にマスクをかける。
     clip_img = frame * mask_img
 
-    cv2.drawContours(clip_img, contour_family, -1, (255,0,0), 10)
+    clip_img = augment_color(clip_img)
 
+    cv2.drawContours(clip_img, [ contour ], -1, (255,0,0), edge_width)
 
     # 回転を考慮した外接矩形を得る。
     rect = cv2.minAreaRect(contour)
+
+    # 外接矩形の頂点
     box = cv2.boxPoints(rect)
 
+    # 外接矩形を描く。
     cv2.drawContours(clip_img, [ np.int0(box) ], 0, (0,255,0), 2)
 
-
+    # マスクした元画像を表示する。
     show_image(window['-image21-'], clip_img)
-
-
-    frame2 = frame.copy()
-
-    # # コントラストと輝度を変える。
-    # img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
-    # img_hsv2 = np.copy(img_hsv)
-
-    # s_mag = random.uniform(0.5, 1.0)
-    # v_mag = random.uniform(0.5, 1.0)
-
-    # img_hsv2[:,:,(1)] = img_hsv2[:,:,(1)] * s_mag
-    # img_hsv2[:,:,(2)] = img_hsv2[:,:,(2)] * v_mag
-
-    # frame2 = cv2.cvtColor(img_hsv2, cv2.COLOR_HSV2BGR)
-
-    # 元画像にマスクをかける。
-    clip_img = frame2 * mask_img
 
     # 最小外接円の中心と半径
     (cx, cy), radius = cv2.minEnclosingCircle(contour)    
+
+    # 最小外接円を描く。
     cv2.circle(clip_img, (int(cx), int(cy)), int(radius), (255,255,255), 1)
 
     # 画像の高さと幅
@@ -231,7 +234,6 @@ def showVideo(frame):
     assert radius2 <= cx + dx and cx + dx <= width - radius2
     assert radius2 <= cy + dy and cy + dy <= height - radius2
 
-
     # 乱数で回転量を決める。
     angle = random.uniform(-180, 180)
 
@@ -251,7 +253,7 @@ def showVideo(frame):
 
     # 画像に変換行列を作用させる。
     dst_img2 = cv2.warpAffine(clip_img, M, (width, height))
-    warp_img = cv2.warpAffine(frame2, M, (width, height))
+    warp_img = cv2.warpAffine(frame, M, (width, height))
     mask_img2 = cv2.warpAffine(mask_img, M, (width, height))
     edge_img2 = cv2.warpAffine(edge_img, M, (width, height))
 
@@ -265,26 +267,33 @@ def showVideo(frame):
     # 内部のマスクを使って、背景画像と元画像を合成する。
     compo_img = np.where(mask_img2 == 0, bg_img, warp_img)
 
-    # 縁のマスクを使って、背景画像と元画像を合成する。
+    # 背景と元画像を7対3の割合で合成する。
     blend_img = cv2.addWeighted(bg_img, 0.7, warp_img, 0.3, 0.0)
+
+    # 縁の部分をブレンドした色で置き換える。
     compo_img = np.where(edge_img2 == 0, compo_img, blend_img)
 
-    corners2 = warp_box(box, M)
+    # 頂点に変換行列をかける。
+    corners2 = [ np.dot(M, np.array(p + [1])).tolist() for p in box.tolist() ]
 
-    corners2 = box_slope(corners2)
+    # 最初の頂点から2番目の頂点へ向かう辺の角度が±45°以下になるように、頂点の順番を変える。
+    corners2 = rotate_corners(corners2)
     if corners2 is None:
         print('slope is None')
         
         return
 
-    bbox = _corners2rotatedbbox(corners2)
-    x, y, w, h, theta = bbox
-
-    cv2.rectangle(dst_img2, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
-
-
+    # 座標変換後の外接矩形を描く。
     cv2.drawContours(dst_img2, [ np.int0(corners2)  ], 0, (0,255,0), 2)
 
+    # バウンディングボックスと回転角を得る。
+    bounding_box = _corners2rotatedbbox(corners2)
+    x, y, w, h, theta = bounding_box
+
+    # バウンディングボックスを描く。
+    cv2.rectangle(dst_img2, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
+
+    # バウンディングボックスの左上の頂点の位置に円を描く。
     cv2.circle(dst_img2, (int(x), int(y)), 10, (255,255,255), -1)
 
 
@@ -294,9 +303,10 @@ def showVideo(frame):
 
     if network is not None:
 
+        # 動画の現在位置
         pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
 
-        network.add_image(classIdx, VideoIdx, pos, compo_img, corners2, bbox)
+        network.add_image(classIdx, VideoIdx, pos, compo_img, corners2, bounding_box)
 
 
 
@@ -329,18 +339,6 @@ def get_tree_data(video_dir):
             video_pathes.append(video_path_str)
 
     return treedata
-
-
-def setPlaying(is_playing):
-    global playing
-
-    playing = is_playing
-    if playing:
-        window['-play/pause-'].update(text='Pause')
-        print('show pause')
-    else:
-        window['-play/pause-'].update(text='Play')
-        print('show play')
 
 def saveImgs():
     global cap, VideoIdx, classIdx
@@ -410,8 +408,14 @@ if __name__ == '__main__':
         ,
         [ sg.Input(str(data_size), key='-data-size-', size=(6,1)), sg.Text('', size=(6,1), key='-images-cnt-') ]
         ,
+        [ sg.Frame('Color Augmentation', [
+            spin('Hue', '-hue-shift-', hue_shift, 0, 30),
+            spin('Saturation', '-saturation-shift-', saturation_shift, 0, 50),
+            spin('Value', '-value-shift-', value_shift, 0, 50)
+        ])]
+        ,
         spin('V lo', '-Vlo-', V_lo, 0, 255),
-        spin('S mag', '-S_mag-', 100, 10, 200) + spin('V mag', '-V_mag-', 100, 10, 200) + [ sg.Text('network', size=(6,1)), sg.Combo(['ODTK', 'YOLOv5'], default_value = 'YOLOv5', key='-network-') ],
+        [ sg.Text('network', size=(6,1)), sg.Combo(['ODTK', 'YOLOv5'], default_value = 'YOLOv5', key='-network-') ],
         [ sg.Button('Play', key='-play/pause-'), sg.Button('Save All', key='-save-all-'), sg.Button('Close')] ]
 
     # Create the Window
@@ -451,13 +455,14 @@ if __name__ == '__main__':
         elif event == '-Vlo-':
             V_lo = int(values[event])
 
-        elif event == '-S_mag-':
-            S_mag = int(values[event])
-            showImgPos()
+        elif event == '-hue-shift-':
+            hue_shift = int(values[event])
 
-        elif event == '-V_mag-':
-            V_mag = int(values[event])
-            showImgPos()
+        elif event == '-saturation-shift-':
+            saturation_shift = int(values[event])
+
+        elif event == '-value-shift-':
+            value_shift = int(values[event])
 
         elif event == '__TIMEOUT__':
             if cap is not None and playing:
@@ -467,7 +472,7 @@ if __name__ == '__main__':
             showImgPos()
 
         elif event == '-play/pause-':
-            setPlaying(not playing)
+            playing = setPlaying(window, not playing)
 
         elif event == '-save-all-':
             data_size = int(values['-data-size-'])

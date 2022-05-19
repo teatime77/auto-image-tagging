@@ -1,11 +1,10 @@
+import math
 import numpy as np
 import cv2
 import PySimpleGUI as sg
 from PIL import Image, ImageTk
 
-Next_Sibling, Previous_Sibling, First_Child, Parent = (0, 1, 2, 3)
-
-max_ratio, max_rx, max_ry = 0, 0, 0
+edge_width = 10
 
 def spin(label, key, val, min_val, max_val):
     return [ 
@@ -14,104 +13,107 @@ def spin(label, key, val, min_val, max_val):
     ]
 
 
+def setPlaying(window, is_playing):
+    if is_playing:
+        window['-play/pause-'].update(text='Pause')
+    else:
+        window['-play/pause-'].update(text='Play')
+
+    return is_playing
+
 def show_image(image_element, img):
+    # 256x256のサイズに変換する。
     img = cv2.resize(img, dsize=(256, 256))       
 
     if len(img.shape) == 3:
-        image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # imreadはBGRなのでRGBに変換
-        # print('image_rgb:type', type(image_rgb), image_rgb.shape, image_rgb.dtype)
-        image_pil = Image.fromarray(image_rgb) # RGBからPILフォーマットへ変換
+        # カラー画像の場合
+
+        # BGRからRGBに変換する。
+        image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        # RGBからPILフォーマットへ変換する。
+        image_pil = Image.fromarray(image_rgb)
+
     else:
-        image_pil = Image.fromarray(img) # RGBからPILフォーマットへ変換
+        # グレースケール画像の場合
 
-    image_tk  = ImageTk.PhotoImage(image_pil) # ImageTkフォーマットへ変換
+        # グレースケール画像からPILフォーマットへ変換する。
+        image_pil = Image.fromarray(img)
 
+    # PILフォーマットからImageTkフォーマットへ変換する。
+    image_tk  = ImageTk.PhotoImage(image_pil) 
+
+    # 画像を表示する。
     image_element.update(data=image_tk, size=(256,256))
 
 
-def isObject(shape, contour):
-    global max_ratio, max_rx, max_ry
-
-    # 二値画像の幅と高さ
-    width, height = shape[:2]
-
-    # 二値画像の面積
-    img_area = width * height
-
-    # 輪郭の面積
-    area = cv2.contourArea(contour)
-    ratio = 100 * np.sqrt(area) / np.sqrt(img_area)
-
-    if max_ratio < ratio:
-        max_ratio = ratio
-
-    if ratio < 40:
-        return False
-
+def center_distance(cx, cy, contour):
     # 輪郭のモーメントを計算する。
     M = cv2.moments(contour)
 
+    if M['m00'] == 0:
+        return 10000
+
     # モーメントから重心のXY座標を計算す。
-    cx = int(M['m10']/M['m00'])
-    cy = int(M['m01']/M['m00'])
+    bx = int(M['m10']/M['m00'])
+    by = int(M['m01']/M['m00'])
 
-    rx = int(100 * cx / width)
-    ry = int(100 * cy / height)
+    # 画像の中心から物体の重心までの変位
+    dx = bx - cx
+    dy = by - cy
 
-    if max_ratio == ratio:
-        max_rx, max_ry = rx, ry
+    # 画像の中心から物体の重心までの距離を返す。
+    return math.sqrt(dx * dx + dy * dy)
 
-    return 35 <= rx and rx <= 65 and 35 <= ry and ry <= 65
+def bounding_rect_len(img_width, img_height, contour):
+    x,y,w,h = cv2.boundingRect(contour)
 
-def contour_children(contours, hierarchy, idx, children):
-    # 最初の子
-    i = hierarchy[0][idx][First_Child]
-    while i != -1:
-        c = contours[i]
-        children.append(c)
-
-        j = hierarchy[0][idx][First_Child]
-        if j != -1:
-            contour_children(contours, hierarchy, j, children)
-
-        # 次の兄弟
-        i = hierarchy[0][i][Next_Sibling]
-
+    return (w + h) / (img_width + img_height)
 
 def getContour(bin_img):
-    global max_ratio, max_rx, max_ry
 
     # 二値化画像から輪郭のリストを得る。
-    contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)   # RETR_EXTERNAL  RETR_CCOMP 
+    contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)   #  RETR_TREE RETR_CCOMP 
 
-    assert(len(hierarchy.shape) == 3 and hierarchy.shape[0] == 1 and hierarchy.shape[2] == 4)
-    assert(len(contours) == hierarchy.shape[1])
+    # 画像の高さと幅
+    img_height, img_width = bin_img.shape[:2]
 
-    max_ratio, max_rx, max_ry = 0, 0, 0
+    # 画像の面積
+    img_area = img_width * img_height
 
-    for idx, _ in enumerate(contours):
-        if hierarchy[0][idx][Parent] == -1:
-            # トップレベルの場合
+    # 大きさが画像の10%未満の輪郭は除く。
+    contours = [ c for c in contours if 0.10 < math.sqrt(cv2.contourArea(c) / img_area) ]
+    if len(contours) == 0:
+        # 輪郭がない場合
 
-            contour = contours[idx]
-            if isObject(bin_img.shape, contour):
+        print('side len')
+        return [None] * 3
 
-                contour_family = [ contour ]
-                contour_children(contours, hierarchy, idx, contour_family)
+    # 外接矩形の辺の長さが画像の辺の長さの90%以上の輪郭は除く。
+    contours = [ c for c in contours if 0.9 > bounding_rect_len(img_width, img_height, c) ]
 
+    if len(contours) == 0:
+        # 輪郭がない場合
 
-                # 輪郭から0と1の二値の内部のマスク画像を作る。
-                mask_img = np.zeros(bin_img.shape + (3,), dtype=np.uint8)
-                cv2.drawContours(mask_img, contour_family, -1, (1,1,1), -1)
+        print('area check')
+        return [None] * 3
 
-                # 輪郭から0と1の二値の縁のマスク画像を作る。
-                edge_img = np.zeros(bin_img.shape + (3,), dtype=np.uint8)
-                cv2.drawContours(edge_img, contour_family, -1, (1,1,1), 5)
+    # 画像の中心
+    cx = img_width  / 2
+    cy = img_height / 2
 
+    # 重心と画像の中心との距離が最小の輪郭のインデックス
+    center_idx = np.argmin( [ center_distance(cx, cy, cont) for cont in contours ] )
 
+    # 重心と画像の中心との距離が最小の輪郭
+    contour = contours[center_idx]
 
-                return contour, contour_family, mask_img, edge_img
+    # 輪郭から0と1の二値の内部のマスク画像を作る。
+    mask_img = np.zeros(bin_img.shape + (3,), dtype=np.uint8)
+    cv2.drawContours(mask_img, [ contour ], -1, (1,1,1), -1)
 
-    print(f'ratio : {int(max_ratio)} < 40   35 < rx:{int(max_rx)} < 65 and 35 < ry:{int(max_ry)} < 65')
+    # 輪郭から0と1の二値の縁のマスク画像を作る。
+    edge_img = np.zeros(bin_img.shape + (3,), dtype=np.uint8)
+    cv2.drawContours(edge_img, [ contour ], -1, (1,1,1), edge_width)
 
-    return [None] * 4
+    return contour, mask_img, edge_img
