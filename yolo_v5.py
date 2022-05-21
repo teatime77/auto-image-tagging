@@ -29,9 +29,9 @@ class YOLOv5:
             # フォルダを作る。
             os.makedirs(dir_path, exist_ok=True)
 
-        with open(f'{self.datasets_dir}/yolo_v5.yaml', 'w') as f:
+        with open(f'{self.datasets_dir}/data.yaml', 'w') as f:
             # データフォルダのパス
-            f.write(f'path: .\n')
+            f.write(f'path: /content/datasets\n')
 
             # トレーニング用の画像ファイルの相対パス
             f.write(f'train: images/train\n')

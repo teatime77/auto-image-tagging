@@ -3,12 +3,20 @@ import math
 import numpy as np
 import json
 import cv2
+import shutil
 
 class ODTK:
     def __init__(self, output_dir, image_classes):
         self.output_dir = output_dir
 
-        os.makedirs(f'{output_dir}/img', exist_ok=True)
+        img_dir = f'{output_dir}/img'
+        if os.path.isdir(img_dir):
+            # フォルダがすでにある場合
+
+            # フォルダを削除する。
+            shutil.rmtree(img_dir)
+
+        os.makedirs(img_dir, exist_ok=True)
 
         self.AnnoObj = {
             "annotations":[],
@@ -33,7 +41,7 @@ class ODTK:
 
         image_id = len(self.AnnoObj["images"]) + 1
 
-        file_name = f'{class_idx}-{video_idx}-{pos}-{image_id}.png'
+        file_name = f'{class_idx}-{video_idx}-{pos}-{image_id}.jpg'
 
         img_path = f'{self.output_dir}/img/{file_name}'
         cv2.imwrite(img_path, compo_img)

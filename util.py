@@ -66,11 +66,29 @@ def center_distance(cx, cy, contour):
     return math.sqrt(dx * dx + dy * dy)
 
 def bounding_rect_len(img_width, img_height, contour):
+    """外接矩形の辺の長さを返す。
+
+    Args:
+        img_width (_type_): 元画像の幅
+        img_height (_type_): 元画像の高さ
+        contour (_type_): 輪郭
+
+    Returns:
+        _type_: 輪郭の長さ
+    """
     x,y,w,h = cv2.boundingRect(contour)
 
     return (w + h) / (img_width + img_height)
 
 def getContour(bin_img):
+    """二値化画像から輪郭を得る。
+
+    Args:
+        bin_img (_type_): 二値化画像
+
+    Returns:
+        _type_: 輪郭
+    """
 
     # 二値化画像から輪郭のリストを得る。
     contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)   #  RETR_TREE RETR_CCOMP 

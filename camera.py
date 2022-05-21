@@ -11,6 +11,8 @@ writer  = None
 V_lo = 253
 
 def initWriter():
+    """動画ファイルへのライターを初期化する。
+    """
     global writer
 
     os.makedirs('capture', exist_ok=True)
@@ -75,110 +77,111 @@ resolutions = [
     [ 1920, 1080 ]
 ]
 
-cap = cv2.VideoCapture(0) # 任意のカメラ番号に変更する
+if __name__ == '__main__':
+    cap = cv2.VideoCapture(0) # 任意のカメラ番号に変更する
 
-brightness = int(cap.get(cv2.CAP_PROP_BRIGHTNESS))
-exposure   = int(cap.get(cv2.CAP_PROP_EXPOSURE))
-contrast   = int(cap.get(cv2.CAP_PROP_CONTRAST))
+    brightness = int(cap.get(cv2.CAP_PROP_BRIGHTNESS))
+    exposure   = int(cap.get(cv2.CAP_PROP_EXPOSURE))
+    contrast   = int(cap.get(cv2.CAP_PROP_CONTRAST))
 
-print('BRIGHTNESS', brightness)
-print('EXPOSURE'  , exposure)
-print('CONTRAST'  , contrast)
-print('FPS'       , cap.get(cv2.CAP_PROP_FPS))
-print('AUTO EXPOSURE', cap.get(cv2.CAP_PROP_AUTO_EXPOSURE))
+    print('BRIGHTNESS', brightness)
+    print('EXPOSURE'  , exposure)
+    print('CONTRAST'  , contrast)
+    print('FPS'       , cap.get(cv2.CAP_PROP_FPS))
+    print('AUTO EXPOSURE', cap.get(cv2.CAP_PROP_AUTO_EXPOSURE))
 
-WIDTH  = 960
-HEIGHT = 720
+    WIDTH  = 960
+    HEIGHT = 720
 
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
 
-assert int(cap.get(cv2.CAP_PROP_FRAME_WIDTH )) == WIDTH
-assert int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) == HEIGHT
+    assert int(cap.get(cv2.CAP_PROP_FRAME_WIDTH )) == WIDTH
+    assert int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) == HEIGHT
 
-WIDTH  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-HEIGHT = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    WIDTH  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    HEIGHT = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-img_size   = min(WIDTH, HEIGHT)
+    img_size   = min(WIDTH, HEIGHT)
 
-print('WIDTH'     , WIDTH)
-print('HEIGHT'    , HEIGHT)
-
-
-frame_rate = cap.get(cv2.CAP_PROP_FPS)
-
-fmt = cv2.VideoWriter_fourcc('m', 'p', '4', 'v') # ファイル形式(ここではmp4)
-
-# ret_val , cap_for_exposure = cap.read()
-# cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-# cap.set(cv2.CAP_PROP_EXPOSURE , -1)
+    print('WIDTH'     , WIDTH)
+    print('HEIGHT'    , HEIGHT)
 
 
-sg.theme('DarkAmber')   # Add a touch of color
+    frame_rate = cap.get(cv2.CAP_PROP_FPS)
 
-layout = [
-    [
-        sg.Column([
-            [ sg.Image(filename='', size=(256,256), key='-image11-') ],
-            [ sg.Image(filename='', size=(256,256), key='-image21-') ]
-        ])
+    fmt = cv2.VideoWriter_fourcc('m', 'p', '4', 'v') # ファイル形式(ここではmp4)
+
+    # ret_val , cap_for_exposure = cap.read()
+    # cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+    # cap.set(cv2.CAP_PROP_EXPOSURE , -1)
+
+
+    sg.theme('DarkAmber')   # Add a touch of color
+
+    layout = [
+        [
+            sg.Column([
+                [ sg.Image(filename='', size=(256,256), key='-image11-') ],
+                [ sg.Image(filename='', size=(256,256), key='-image21-') ]
+            ])
+            ,
+            sg.Column([
+                [ sg.Image(filename='', size=(256,256), key='-image12-') ],
+                [ sg.Image(filename='', size=(256,256), key='-image22-') ]
+            ])
+            ,
+            sg.Column([
+                [ sg.Image(filename='', size=(256,256), key='-image13-') ],
+                [ sg.Image(filename='', size=(256,256), key='-image23-') ]
+            ])
+        ]
         ,
-        sg.Column([
-            [ sg.Image(filename='', size=(256,256), key='-image12-') ],
-            [ sg.Image(filename='', size=(256,256), key='-image22-') ]
-        ])
+        spin('V lo', '-Vlo-', V_lo, 0, 255),
+        spin('brightness', '-brightness-', brightness, 0, 255),
+        spin('exposure', '-exposure-', exposure, -20, 20),
+        spin('contrast', '-contrast-', contrast,   0, 255)
         ,
-        sg.Column([
-            [ sg.Image(filename='', size=(256,256), key='-image13-') ],
-            [ sg.Image(filename='', size=(256,256), key='-image23-') ]
-        ])
+        [ sg.Button('Play', key='-play/pause-'), sg.Button('Close') ]
     ]
-    ,
-    spin('V lo', '-Vlo-', V_lo, 0, 255),
-    spin('brightness', '-brightness-', brightness, 0, 255),
-    spin('exposure', '-exposure-', exposure, -20, 20),
-    spin('contrast', '-contrast-', contrast,   0, 255)
-    ,
-    [ sg.Button('Play', key='-play/pause-'), sg.Button('Close') ]
-]
 
-window = sg.Window('Window Title', layout)
+    window = sg.Window('Window Title', layout)
 
-while True:
+    while True:
 
-    event, values = window.read(timeout=1)
+        event, values = window.read(timeout=1)
 
-    if event == sg.WIN_CLOSED or event == 'Close':
-        break
+        if event == sg.WIN_CLOSED or event == 'Close':
+            break
 
-    elif event == '-play/pause-':
-        playing = setPlaying(window, not playing)
+        elif event == '-play/pause-':
+            playing = setPlaying(window, not playing)
 
-        if playing:
-            initWriter()
+            if playing:
+                initWriter()
 
-        else:
-            writer.release()
-            writer = None
+            else:
+                writer.release()
+                writer = None
 
-    elif event == '-Vlo-':
-        V_lo = int(values[event])
+        elif event == '-Vlo-':
+            V_lo = int(values[event])
 
-    elif event == '-brightness-':
-        brightness = int(values[event])
-        cap.set(cv2.CAP_PROP_BRIGHTNESS, brightness)
+        elif event == '-brightness-':
+            brightness = int(values[event])
+            cap.set(cv2.CAP_PROP_BRIGHTNESS, brightness)
 
-    elif event == '-exposure-':
-        exposure = int(values[event])
-        cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
+        elif event == '-exposure-':
+            exposure = int(values[event])
+            cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
 
-    elif event == '-contrast-':
-        contrast = int(values[event])
-        cap.set(cv2.CAP_PROP_CONTRAST, contrast)
+        elif event == '-contrast-':
+            contrast = int(values[event])
+            cap.set(cv2.CAP_PROP_CONTRAST, contrast)
 
-    elif event == '__TIMEOUT__':
-        readCap()
+        elif event == '__TIMEOUT__':
+            readCap()
 
 
 
-cap.release()
+    cap.release()

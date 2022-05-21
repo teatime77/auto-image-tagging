@@ -2,6 +2,7 @@ import os
 import sys
 import math
 import random
+import argparse
 import glob
 import cv2
 import numpy as np
@@ -10,16 +11,19 @@ from odtk import _corners2rotatedbbox, ODTK
 from yolo_v5 import YOLOv5
 from util import spin, show_image, getContour, edge_width, setPlaying
 
-data_size = 5000
+data_size = 1000
 playing = False
 network = None
 
-hue_shift = 15
+hue_shift = 10
 saturation_shift = 15
 value_shift = 15
 
 classIdx = 0
 imageClasses = []
+
+# 背景画像ファイルのインデックス
+bgImgIdx = 0
 
 V_lo = 250
 
@@ -28,6 +32,8 @@ V_mag =  100
 
 
 class ImageClass:
+    """画像のクラス(カテゴリー)
+    """
     def __init__(self, name, class_dir):
         self.name = name
         self.classDir = class_dir
@@ -35,6 +41,11 @@ class ImageClass:
 
 
 def initCap():
+    """動画のキャプチャーの初期処理をする。
+
+    Returns:
+        VideoCapture: キャプチャー オブジェクト
+    """
     global VideoIdx, playing
 
     # 動画ファイルのパス
@@ -91,11 +102,31 @@ def readCap():
 
             window['-images-cnt-'].update(f'  {images_cnt}枚')
 
-            if data_size <= images_cnt:
+            # 現在のクラスのテータ数をカウントアップ
+            class_data_cnt[classIdx] += 1
 
+            if data_size <= class_data_cnt[classIdx]:
+                # 現在のクラスのテータ数が指定値に達した場合
+
+                # キャプチャー オブジェクトを解放する。
                 cap.release()
-                stopSave()
-                print("保存終了")
+
+                if data_size <= min(class_data_cnt):
+                    # すべてのクラスのデータ数が指定値に達した場合
+
+                    stopSave()
+                    print("保存終了")
+
+                else:
+                    # データ数が指定値に達していないクラスがある場合
+
+                    # データ数が最小のクラスのインデックス
+                    classIdx = class_data_cnt.index(min(class_data_cnt))
+
+                    # 動画のインデックス
+                    VideoIdx = 0
+
+                    cap = initCap()
 
     else:
         # 動画の終わりの場合
@@ -113,8 +144,8 @@ def readCap():
         else:
             # 同じクラスの別の動画ファイルがない場合
 
-            # 次のクラスのインデックス
-            classIdx = (classIdx + 1) % len(imageClasses)
+            # データ数が最小のクラスのインデックス
+            classIdx = class_data_cnt.index(min(class_data_cnt))
 
             # 動画のインデックス
             VideoIdx = 0
@@ -123,25 +154,37 @@ def readCap():
 
 
 def augment_color(img):
-    # コントラストと輝度を変える。
+    # BGRからHSVに変える。
     hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) 
 
+    # HSVの各チャネルに対し
     for channel, shift in enumerate([hue_shift, saturation_shift, value_shift]):
         if shift == 0:
             continue
 
+        # 変化量を乱数で決める。
         change = np.random.randint(-shift, shift)
 
         if channel == 0:
+            # 色相の場合
+
             data = hsv_img[:, :, channel].astype(np.int32)
+
+            # 変化後の色相が0～180の範囲に入るように色相をずらす。
             data = (data + change + 180) % 180
 
         else:
+            # 彩度や明度の場合
+
             data  = hsv_img[:, :, channel].astype(np.float32)
+
+            # 変化量は百分率(%)として作用させる。
             data  = (data * ((100 + change) / 100.0) ).clip(0, 255)
 
+        # 変化させた値をチャネルにセットする。
         hsv_img[:, :, channel] = data.astype(np.uint8)
 
+    # HSVからBGRに変える。
     return cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
         
 
@@ -180,10 +223,10 @@ def showVideo(frame):
     if contour is None:
         return
 
-    # 元画像にマスクをかける。
-    clip_img = frame * mask_img
+    aug_img = augment_color(frame)
 
-    clip_img = augment_color(clip_img)
+    # 元画像にマスクをかける。
+    clip_img = aug_img * mask_img
 
     cv2.drawContours(clip_img, [ contour ], -1, (255,0,0), edge_width)
 
@@ -206,7 +249,7 @@ def showVideo(frame):
     cv2.circle(clip_img, (int(cx), int(cy)), int(radius), (255,255,255), 1)
 
     # 画像の高さと幅
-    height, width = frame.shape[:2]
+    height, width = aug_img.shape[:2]
 
     # 画像の短辺の長さ
     min_size = min(height, width)
@@ -253,7 +296,7 @@ def showVideo(frame):
 
     # 画像に変換行列を作用させる。
     dst_img2 = cv2.warpAffine(clip_img, M, (width, height))
-    warp_img = cv2.warpAffine(frame, M, (width, height))
+    aug_img2 = cv2.warpAffine(aug_img, M, (width, height))
     mask_img2 = cv2.warpAffine(mask_img, M, (width, height))
     edge_img2 = cv2.warpAffine(edge_img, M, (width, height))
 
@@ -262,13 +305,13 @@ def showVideo(frame):
     bgImgIdx = (bgImgIdx + 1) % len(bgImgPaths)
 
     # 背景画像を元画像と同じサイズにする。
-    bg_img = cv2.resize(bg_img, dsize=frame.shape[:2])                    
+    bg_img = cv2.resize(bg_img, dsize=aug_img.shape[:2])                    
 
     # 内部のマスクを使って、背景画像と元画像を合成する。
-    compo_img = np.where(mask_img2 == 0, bg_img, warp_img)
+    compo_img = np.where(mask_img2 == 0, bg_img, aug_img2)
 
     # 背景と元画像を7対3の割合で合成する。
-    blend_img = cv2.addWeighted(bg_img, 0.7, warp_img, 0.3, 0.0)
+    blend_img = cv2.addWeighted(bg_img, 0.7, aug_img2, 0.3, 0.0)
 
     # 縁の部分をブレンドした色で置き換える。
     compo_img = np.where(edge_img2 == 0, compo_img, blend_img)
@@ -308,15 +351,10 @@ def showVideo(frame):
 
         network.add_image(classIdx, VideoIdx, pos, compo_img, corners2, bounding_box)
 
+def make_image_classes(video_dir):
+    global imageClasses
 
-
-def get_tree_data(video_dir):
-    global video_pathes, imageClasses
-
-    video_pathes = []
     imageClasses = []
-
-    treedata = sg.TreeData()
 
     for class_dir in glob.glob(f'{video_dir}/*'):
         category_name = os.path.basename(class_dir)
@@ -324,19 +362,25 @@ def get_tree_data(video_dir):
         img_class = ImageClass(category_name, class_dir)
         imageClasses.append(img_class)
 
-        treedata.Insert('', class_dir, category_name, values=[])
-        print(f'category:{category_name} {str(class_dir)}')
-
+        # クラスのフォルダ内の動画ファイルに対し
         for video_path in glob.glob(f'{class_dir}/*'):
-            video_name = os.path.basename(video_path)
 
-            video_path_str = str(video_path)
-            print(f'video:{video_path_str}')        
-
-            treedata.Insert(class_dir, video_path_str, video_name, values=[video_path_str])
+            video_path_str = str(video_path).replace('\\', '/')
 
             img_class.videoPathes.append(video_path_str)
-            video_pathes.append(video_path_str)
+
+
+def get_tree_data():
+    treedata = sg.TreeData()
+
+    # すべてのクラスに対し
+    for img_class in imageClasses:
+        treedata.Insert('', img_class.name, img_class.name, values=[])
+
+        # クラスの動画に対し
+        for video_path in img_class.videoPathes:
+            video_name = os.path.basename(video_path)
+            treedata.Insert(img_class.name, video_path, video_name, values=[video_path])
 
     return treedata
 
@@ -344,10 +388,6 @@ def saveImgs():
     global cap, VideoIdx, classIdx
 
     VideoIdx = 0
-
-    for img_path in glob.glob(f'{output_dir}/img/*.png'):
-        print(f'削除:{img_path}')
-        os.remove(img_path)
 
     cap = initCap()
 
@@ -357,26 +397,44 @@ def showImgPos():
         cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
         readCap()
 
+def parse(args):
+    parser = argparse.ArgumentParser(description='Auto Image Tag')
+    parser.add_argument('-i','--input', type=str, help='path to videos')
+    parser.add_argument('-bg', type=str, help='path to background images')
+    parser.add_argument('-o','--output', type=str, help='path to outpu')
+
+    return parser.parse_args(args)
+
 if __name__ == '__main__':
+    args = parse(sys.argv[1:])
+
+    print(args)
+
     print(cv2.getBuildInformation())
 
-    video_dir = sys.argv[1]
-    bg_img_dir = sys.argv[2]
+    # 動画ファイルのフォルダのパス
+    video_dir = args.input.replace('\\', '/')
 
-    output_dir = sys.argv[3]
+    # 背景画像ファイルのフォルダのパス
+    bg_img_dir = args.bg.replace('\\', '/')
+
+    # 出力先フォルダのパス
+    output_dir = args.output.replace('\\', '/')
+
+    # 出力先フォルダを作る。
     os.makedirs(output_dir, exist_ok=True)
 
-
+    # 背景画像ファイルのパス
     bgImgPaths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
 
     print(f'背景画像数:{len(bgImgPaths)}')
 
-    bgImgIdx = 0
+    make_image_classes(video_dir)
+
+    # ツリー表示のデータを作る。
+    treedata = get_tree_data()
 
     sg.theme('DarkAmber')   # Add a touch of color
-
-    treedata = get_tree_data(video_dir)
-
 
     # All the stuff inside your window.
     layout = [  
@@ -437,18 +495,24 @@ if __name__ == '__main__':
 
         if event == '-tree-':
             print(f'クリック [{values[event]}] [{values[event][0]}]')
+
+            # クリックされたノードのvaluesの最初の値
             video_path = values[event][0]
-            if video_path in video_pathes:
+
+            if os.path.isfile(video_path):
+                # 動画ファイルの場合
 
                 if cap is not None:
+                    # 再生中の場合
+
+                    # キャプチャー オブジェクトを解放する。
                     cap.release()
 
-                v = [ (i, c) for i, c in enumerate(imageClasses) if video_path in c.videoPathes ]
-                assert len(v) == 1
 
-                classIdx = v[0][0]
-                img_class = v[0][1]
-                VideoIdx = img_class.videoPathes.index(video_path)
+                # 動画ファイルを含むクラスとインデックス
+                classIdx, img_class = [ (idx, c) for idx, c in enumerate(imageClasses) if video_path in c.videoPathes ][0]
+
+                VideoIdx  = img_class.videoPathes.index(video_path)
 
                 cap = initCap()
 
@@ -476,7 +540,11 @@ if __name__ == '__main__':
 
         elif event == '-save-all-':
             data_size = int(values['-data-size-'])
+            class_data_cnt = [0] * len(imageClasses)
             classIdx = 0
+
+            # 背景画像ファイルのインデックス
+            bgImgIdx = 0
 
             if values['-network-'] == 'ODTK':
                 network = ODTK(output_dir, imageClasses)
