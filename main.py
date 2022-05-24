@@ -6,11 +6,13 @@ import argparse
 import glob
 import cv2
 import numpy as np
+from tqdm import tqdm
 from odtk import _corners2rotatedbbox, ODTK
 from yolo_v5 import YOLOv5
-from util import spin, show_image, getContour, edge_width, setPlaying
+from util import spin, show_image, getContour, edge_width
 
-data_size = 1000
+cap = None
+
 playing = False
 network = None
 
@@ -19,10 +21,6 @@ saturation_shift = 15
 value_shift = 15
 
 classIdx = 0
-imageClasses = []
-
-# 背景画像ファイルのインデックス
-bgImgIdx = 0
 
 V_lo = 250
 
@@ -37,6 +35,19 @@ class ImageClass:
         self.name = name
         self.classDir = class_dir
         self.videoPathes = []
+
+class CaptureIterator(object):
+    def __init__(self):
+        pass
+
+    def __iter__(self):
+    #     return self
+
+    # def __next__(self):
+        for i in range(10):
+            yield i
+
+        raise StopIteration()
 
 
 def augment_color(img):
@@ -89,6 +100,19 @@ def rotate_corners(box):
 
     return None
 
+def resize_bg_img(bg_img, shape):
+    h, w = bg_img.shape[:2]
+
+    size = min(h, w)
+    y1 = (h - size) // 2
+    x1 = (w - size) // 2
+
+    y2 = y1 + size
+    x2 = x1 + size
+    bg_img = bg_img[y1:y2, x1:x2, :]
+    bg_img = cv2.resize(bg_img, dsize=shape[:2])
+
+    return bg_img
 
 def make_train_data(frame, bg_img):
     # グレー画像
@@ -177,7 +201,7 @@ def make_train_data(frame, bg_img):
     edge_img2 = cv2.warpAffine(edge_img, M, (width, height))
 
     # 背景画像を元画像と同じサイズにする。
-    bg_img = cv2.resize(bg_img, dsize=aug_img.shape[:2])                    
+    bg_img = resize_bg_img(bg_img, aug_img.shape)             
 
     # 内部のマスクを使って、背景画像と元画像を合成する。
     compo_img = np.where(mask_img2 == 0, bg_img, aug_img2)
@@ -236,7 +260,8 @@ def parse():
     parser.add_argument('-i','--input', type=str, help='path to videos')
     parser.add_argument('-bg', type=str, help='path to background images')
     parser.add_argument('-o','--output', type=str, help='path to outpu')
-    parser.add_argument('-net','--network', type=str, help='odtk or yolov5')
+    parser.add_argument('-net','--network', type=str, help='odtk or yolov5', default='')
+    parser.add_argument('-dsize', '--data_size', type=int, help='data size', default=1000)
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -251,111 +276,77 @@ def parse():
 
     network_name = args.network.lower()
 
-    return video_dir, bg_img_dir, output_dir, network_name
+    return video_dir, bg_img_dir, output_dir, network_name, args.data_size
 
-class CaptureIterator(object):
-    def __init__(self, *numbers):
-        self._numbers = numbers
-        self._i = 0
+def get_video_capture(video_path):
+    global cap
 
-    def __iter__(self):
-        # __next__()はselfが実装してるのでそのままselfを返す
-        return self
+    if cap is not None:
+        print('cap release')
+        cap.release()
 
-    def __next__(self):
-        ret, frame = cap.read()
-        if ret:
-            # 画像が取得できた場合
+    cap = cv2.VideoCapture(video_path)    
 
-            # 動画の現在位置
-            pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+    return cap
 
-            # 背景画像ファイルを読む。
-            bg_img = cv2.imread(bgImgPaths[bgImgIdx])
-            bgImgIdx = (bgImgIdx + 1) % len(bgImgPaths)
+def init_cap(image_class, video_idx):
+    video_path = image_class.videoPathes[video_idx]
 
-            frame, gray_img, bin_img, clip_img, dst_img2, compo_img, corners2, bounding_box = make_train_data(frame, bg_img)
+    # 動画のキャプチャー オブジェクト
+    cap = get_video_capture(video_path)    
 
-            if network is not None:
+    if not cap.isOpened():
+        print("動画再生エラー")
+        sys.exit()
+
+    return cap
+
+
+def make_training_data(image_classes, bg_img_paths, network, data_size):
+
+    # 背景画像ファイルのインデックス
+    bg_img_idx = 0
+
+    for class_idx, image_class in enumerate(image_classes):
+        class_data_cnt = 0
+
+        video_idx = 0
+        cap = init_cap(image_class, video_idx)
+        while class_data_cnt < data_size:
+
+            ret, frame = cap.read()
+            if ret:
+                # 画像が取得できた場合
+
+                # 動画の現在位置
+                pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+
+                # 背景画像ファイルを読む。
+                bg_img = cv2.imread(bg_img_paths[bg_img_idx])
+                bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
+
+                frame, gray_img, bin_img, clip_img, dst_img2, compo_img, corners2, bounding_box = make_train_data(frame, bg_img)
+
+                yield (frame, gray_img, bin_img, clip_img, dst_img2, compo_img)
 
                 network.add_image(class_idx, video_idx, pos, compo_img, corners2, bounding_box)
 
                 class_data_cnt += 1
 
-                if class_data_cnt % 10 == 0:
-                    print(image_class.name, class_data_cnt)
-
                 if data_size <= class_data_cnt:
                     # 現在のクラスのテータ数が指定値に達した場合
 
-                    # キャプチャー オブジェクトを解放する。
-                    cap.release()
-
                     break
 
-        else:
-
-            # キャプチャー オブジェクトを解放する。
-            cap.release()
-
-            if network is None:
-                video_idx += 1
-
-                if video_idx < len(image_class.videoPathes):
-                    self.init_cap()
-
-                else:
-
-                    class_idx += 1
-
-
             else:
+
                 video_idx = (video_idx + 1) % len(image_class.videoPathes)
-
-
-            if self._i == len(self._numbers):
-                raise StopIteration()
-            value = self._numbers[self._i]
-            self._i += 1
-            return value
-
-    def init_cap(self):
-        video_path = image_class.videoPathes[video_idx]
-
-        # 動画のキャプチャー オブジェクト
-        cap = cv2.VideoCapture(video_path)    
-
-        if not cap.isOpened():
-            print("動画再生エラー")
-            sys.exit()
-
-
-def make_network_data():
-    if network_name == 'odtk':
-        network = ODTK(output_dir, imageClasses)
-    elif network_name == 'yolov5':
-        network = YOLOv5(output_dir, imageClasses)
-
-    else:
-        assert(False)
-
-    print(cv2.getBuildInformation())
-
-    for class_idx, image_class in enumerate(imageClasses):
-        class_data_cnt = 0
-
-        video_idx = 0
-        while class_data_cnt < data_size:
-
-
-            while True:
-
-                yield
+                cap = init_cap(image_class, video_idx)
 
     network.save()
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, network_name = parse()
+    video_dir, bg_img_dir, output_dir, network_name, data_size = parse()
 
     print(cv2.getBuildInformation())
 
@@ -363,9 +354,18 @@ if __name__ == '__main__':
     os.makedirs(output_dir, exist_ok=True)
 
     # 背景画像ファイルのパス
-    bgImgPaths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
+    bg_img_paths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
 
-    imageClasses = make_image_classes(video_dir)
+    image_classes = make_image_classes(video_dir)
 
-    for _ in make_network_data():
+    if network_name == 'odtk':
+        network = ODTK(output_dir, image_classes)
+    elif network_name == 'yolov5':
+        network = YOLOv5(output_dir, image_classes)
+
+    else:
+        assert(False)
+
+    iterator = make_training_data(image_classes, bg_img_paths, network, data_size)
+    for _ in tqdm(iterator, total=len(image_classes) * data_size):
         pass

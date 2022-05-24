@@ -6,36 +6,38 @@ import PySimpleGUI as sg
 from util import spin, show_image, getContour, edge_width, setPlaying
 from odtk import _corners2rotatedbbox, ODTK
 from yolo_v5 import YOLOv5
-from main import parse, data_size, hue_shift, saturation_shift, value_shift, V_lo
-from main import imageClasses, make_train_data, make_image_classes
+from main import parse, hue_shift, saturation_shift, value_shift, V_lo
+from main import make_train_data, make_image_classes, make_training_data, get_video_capture
 
+iterator = None
 network = None
+cap = None
+playing = False
 
-# 背景画像ファイルのインデックス
-bgImgIdx = 0
+class_idx = 0
+video_Idx = 0
 
-def initCap():
+def init_capture(class_idx, video_Idx):
     """動画のキャプチャーの初期処理をする。
 
     Returns:
         VideoCapture: キャプチャー オブジェクト
     """
-    global VideoIdx, playing
+    global playing
 
     # 動画ファイルのパス
-    video_path = imageClasses[classIdx].videoPathes[VideoIdx]
+    video_path = image_classes[class_idx].videoPathes[video_Idx]
 
     # 動画のキャプチャー オブジェクト
-    cap = cv2.VideoCapture(video_path)    
+    cap = get_video_capture(video_path)    
 
     if not cap.isOpened():
         print("動画再生エラー")
         sys.exit()
 
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    window['-img-pos-'].update(range=(0, frame_count))
+    window['-img-pos-'].update(range=(0, frame_count - 1))
     window['-img-pos-'].update(value=0)
-    print(f'再生開始 フレーム数:{cap.get(cv2.CAP_PROP_FRAME_COUNT)} {os.path.basename(video_path)}')
 
     playing = setPlaying(window, True)
 
@@ -59,121 +61,62 @@ def showImage(frame, gray_img, bin_img, clip_img, dst_img2, compo_img):
 
     show_image(window['-image23-'], compo_img)
 
-def readCap():
-    global cap, VideoIdx, classIdx, bgImgIdx
 
-    ret, frame = cap.read()
-    if ret:
-        # 画像が取得できた場合
+def show_videos(class_idx, video_Idx):
+    global cap
 
-        # 動画の現在位置
-        pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+    # 背景画像ファイルのインデックス
+    bg_img_idx = 0
 
-        # 動画の現在位置の表示を更新する。
-        window['-img-pos-'].update(value=pos)
+    while class_idx < len(image_classes):
+        cap = init_capture(class_idx, video_Idx)
+        print('init cap')
 
-        # 背景画像ファイルを読む。
-        bg_img = cv2.imread(bgImgPaths[bgImgIdx])
-        bgImgIdx = (bgImgIdx + 1) % len(bgImgPaths)
+        while True:
+            ret, frame = cap.read()
+            if ret:
+                # 画像が取得できた場合
 
-        frame, gray_img, bin_img, clip_img, dst_img2, compo_img, corners2, bounding_box = make_train_data(frame, bg_img)
+                # 動画の現在位置
+                pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
 
-        showImage(frame, gray_img, bin_img, clip_img, dst_img2, compo_img)
+                # 動画の現在位置の表示を更新する。
+                window['-img-pos-'].update(value=pos)
 
-        if network is not None:
-            # 保存中の場合
+                # 背景画像ファイルを読む。
+                bg_img = cv2.imread(bg_img_paths[bg_img_idx])
+                bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
 
-            # 動画の現在位置
-            pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+                frame, gray_img, bin_img, clip_img, dst_img2, compo_img, corners2, bounding_box = make_train_data(frame, bg_img)
 
-            network.add_image(classIdx, VideoIdx, pos, compo_img, corners2, bounding_box)
+                showImage(frame, gray_img, bin_img, clip_img, dst_img2, compo_img)
 
-            # 取得画像枚数
-            images_cnt = network.images_cnt()
+                yield
+                continue
 
-            window['-images-cnt-'].update(f'  {images_cnt}枚')
+            else:
+                # 動画の終わりの場合
 
-            # 現在のクラスのテータ数をカウントアップ
-            class_data_cnt[classIdx] += 1
+                break
 
-            if data_size <= class_data_cnt[classIdx]:
-                # 現在のクラスのテータ数が指定値に達した場合
+        # 動画のインデックス
+        video_Idx += 1
 
-                # キャプチャー オブジェクトを解放する。
-                cap.release()
-
-                if data_size <= min(class_data_cnt):
-                    # すべてのクラスのデータ数が指定値に達した場合
-
-                    stopSave()
-                    print("保存終了")
-
-                else:
-                    # データ数が指定値に達していないクラスがある場合
-
-                    # データ数が最小のクラスのインデックス
-                    classIdx = class_data_cnt.index(min(class_data_cnt))
-
-                    # 動画のインデックス
-                    VideoIdx = 0
-
-                    cap = initCap()
-
-    else:
-        # 動画の終わりの場合
-
-        # 動画のインデックスをカウントアップ
-        VideoIdx += 1
-
-        # キャプチャー オブジェクトを解放する。
-        cap.release()
-
-        if VideoIdx < len(imageClasses[classIdx].videoPathes):
-            # 同じクラスの別の動画ファイルがある場合
-
-            cap = initCap()
-        else:
+        if len(image_classes[class_idx].videoPathes) <= video_Idx:
             # 同じクラスの別の動画ファイルがない場合
 
-            # データ数が最小のクラスのインデックス
-            classIdx = class_data_cnt.index(min(class_data_cnt))
+            # クラスのインデックス
+            class_idx += 1
 
             # 動画のインデックス
-            VideoIdx = 0
+            video_Idx = 0
 
-            cap = initCap()
-
-
-def stopSave():
-    global VideoIdx, classIdx, network, playing
-
-    network.save()
-
-    VideoIdx = 0
-    classIdx = 0
-    network = None
-
-    playing = setPlaying(window, False)
-    # cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
-def saveImgs():
-    global cap, VideoIdx, classIdx
-
-    VideoIdx = 0
-
-    cap = initCap()
-
-def showImgPos():
-    if cap is not None:
-        pos = int(values['-img-pos-'])
-        cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
-        readCap()
 
 def get_tree_data():
     treedata = sg.TreeData()
 
     # すべてのクラスに対し
-    for img_class in imageClasses:
+    for img_class in image_classes:
         treedata.Insert('', img_class.name, img_class.name, values=[])
 
         # クラスの動画に対し
@@ -184,7 +127,7 @@ def get_tree_data():
     return treedata
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, network_name = parse()
+    video_dir, bg_img_dir, output_dir, network_name, data_size = parse()
 
     print(cv2.getBuildInformation())
 
@@ -192,11 +135,10 @@ if __name__ == '__main__':
     os.makedirs(output_dir, exist_ok=True)
 
     # 背景画像ファイルのパス
-    bgImgPaths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
+    bg_img_paths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
 
-    imageClasses = make_image_classes(video_dir)
-
-
+    image_classes = make_image_classes(video_dir)
+    
     # ツリー表示のデータを作る。
     treedata = get_tree_data()
 
@@ -208,7 +150,7 @@ if __name__ == '__main__':
                 headings=[],
                 auto_size_columns=True,
                 num_rows=24,
-                col0_width=50,
+                col0_width=30,
                 key="-tree-",
                 show_expanded=False,
                 enable_events=True),
@@ -230,22 +172,32 @@ if __name__ == '__main__':
         ,
         [ sg.Slider(range=(0,100), default_value=0, size=(100,15), orientation='horizontal', change_submits=True, key='-img-pos-') ]
         ,
-        [ sg.Input(str(data_size), key='-data-size-', size=(6,1)), sg.Text('', size=(6,1), key='-images-cnt-') ]
-        ,
         [ sg.Frame('Color Augmentation', [
             spin('Hue', '-hue-shift-', hue_shift, 0, 30),
             spin('Saturation', '-saturation-shift-', saturation_shift, 0, 50),
             spin('Value', '-value-shift-', value_shift, 0, 50)
         ])]
         ,
-        spin('V lo', '-Vlo-', V_lo, 0, 255),
-        [ sg.Text('network', size=(6,1)), sg.Combo(['ODTK', 'YOLOv5'], default_value = 'YOLOv5', key='-network-') ],
-        [ sg.Button('Play', key='-play/pause-'), sg.Button('Save All', key='-save-all-'), sg.Button('Close')] ]
+        spin('V lo', '-Vlo-', V_lo, 0, 255)
+        ,
+        [ sg.Frame('Training Data', [
+            [
+                sg.Text('data size per class', size=(6,1)), 
+                sg.Input(str(data_size), key='-data-size-', size=(6,1)),
+                sg.Text('network', size=(6,1)), 
+                sg.Combo(['ODTK', 'YOLOv5'], default_value = 'YOLOv5', key='-network-'),
+                sg.Button('start', key='-save-all-')
+            ]
+        ])]
+        ,
+        [ sg.Button('Play', key='-play/pause-'), sg.Button('Close')] 
+    ]
 
     # Create the Window
     window = sg.Window('Window Title', layout)
 
     cap = None
+    iterator = None
     while True:
         # event, values = window.read()
         event, values = window.read(timeout=1)
@@ -262,19 +214,13 @@ if __name__ == '__main__':
             if os.path.isfile(video_path):
                 # 動画ファイルの場合
 
-                if cap is not None:
-                    # 再生中の場合
-
-                    # キャプチャー オブジェクトを解放する。
-                    cap.release()
-
-
                 # 動画ファイルを含むクラスとインデックス
-                classIdx, img_class = [ (idx, c) for idx, c in enumerate(imageClasses) if video_path in c.videoPathes ][0]
+                class_idx, img_class = [ (idx, c) for idx, c in enumerate(image_classes) if video_path in c.videoPathes ][0]
 
-                VideoIdx  = img_class.videoPathes.index(video_path)
+                video_Idx  = img_class.videoPathes.index(video_path)
 
-                cap = initCap()
+                iterator = show_videos(class_idx, video_Idx)
+                playing = setPlaying(window, True)
 
         elif event == '-Vlo-':
             V_lo = int(values[event])
@@ -289,29 +235,54 @@ if __name__ == '__main__':
             value_shift = int(values[event])
 
         elif event == '__TIMEOUT__':
-            if cap is not None and playing:
-                readCap()
+            if playing and iterator is not None:
+                try:
+                    iterator.__next__()
+
+                except StopIteration:
+                    iterator = None
 
         elif event == '-img-pos-':
-            showImgPos()
+            if cap is not None:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, int(values['-img-pos-']))
+
+                if not playing and iterator is not None:
+                    try:
+                        iterator.__next__()
+
+                    except StopIteration:
+                        iterator = None
 
         elif event == '-play/pause-':
             playing = setPlaying(window, not playing)
 
+            if playing and iterator is None:
+                iterator = show_videos(class_idx, video_Idx)
+
         elif event == '-save-all-':
             data_size = int(values['-data-size-'])
-            class_data_cnt = [0] * len(imageClasses)
-            classIdx = 0
-
-            # 背景画像ファイルのインデックス
-            bgImgIdx = 0
 
             if values['-network-'] == 'ODTK':
-                network = ODTK(output_dir, imageClasses)
-            else:
-                network = YOLOv5(output_dir, imageClasses)
+                network = ODTK(output_dir, image_classes)
 
-            saveImgs()
+            elif values['-network-'] == 'YOLOv5':
+                network = YOLOv5(output_dir, image_classes)
+
+            else:
+                assert(False)
+
+            iterator = make_training_data(image_classes, bg_img_paths, network, data_size)
+
+            total_data_size = data_size * len(image_classes)
+            for idx, ret in enumerate(iterator):
+                if not sg.one_line_progress_meter('make training network', idx+1, total_data_size, orientation='h'):
+
+                    break
+
+                if idx == total_data_size - 1:
+                    sg.popup_ok('training data is created.')
+            
+
 
         else:
 

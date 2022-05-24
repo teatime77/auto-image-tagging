@@ -181,7 +181,3 @@ if __name__ == '__main__':
 
         elif event == '__TIMEOUT__':
             readCap()
-
-
-
-    cap.release()
