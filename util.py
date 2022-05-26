@@ -1,17 +1,9 @@
 import math
 import numpy as np
 import cv2
-import PySimpleGUI as sg
 from PIL import Image, ImageTk
 
 edge_width = 10
-
-def spin(label, key, val, min_val, max_val):
-    return [ 
-        sg.Text(label, size=(6,1)), sg.Text("", size=(6,1)), 
-        sg.Spin(list(range(min_val, max_val + 1)), initial_value=val, size=(10, 1), key=key, enable_events=True )
-    ]
-
 
 def setPlaying(window, is_playing):
     if is_playing:

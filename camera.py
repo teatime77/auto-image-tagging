@@ -1,10 +1,10 @@
 import os
 import datetime
 import cv2
-import PySimpleGUI as sg
-from PIL import Image, ImageTk
-from util import spin, show_image, getContour, setPlaying
 import numpy as np
+import PySimpleGUI as sg
+from util import show_image, getContour, setPlaying
+from gui import spin
 
 playing = False
 writer  = None

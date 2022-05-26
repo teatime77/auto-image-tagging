@@ -3,8 +3,8 @@ import sys
 import glob
 import cv2
 import PySimpleGUI as sg
-from util import spin, show_image, getContour, edge_width, setPlaying
-from odtk import _corners2rotatedbbox, ODTK
+from util import show_image, setPlaying
+from odtk import ODTK
 from yolo_v5 import YOLOv5
 from main import parse, hue_shift, saturation_shift, value_shift, V_lo
 from main import make_train_data, make_image_classes, make_training_data, get_video_capture
@@ -16,6 +16,12 @@ playing = False
 
 class_idx = 0
 video_Idx = 0
+
+def spin(label, key, val, min_val, max_val):
+    return [ 
+        sg.Text(label, size=(6,1)), sg.Text("", size=(6,1)), 
+        sg.Spin(list(range(min_val, max_val + 1)), initial_value=val, size=(10, 1), key=key, enable_events=True )
+    ]
 
 def init_capture(class_idx, video_Idx):
     """動画のキャプチャーの初期処理をする。

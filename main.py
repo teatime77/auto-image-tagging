@@ -9,7 +9,7 @@ import numpy as np
 from tqdm import tqdm
 from odtk import _corners2rotatedbbox, ODTK
 from yolo_v5 import YOLOv5
-from util import spin, show_image, getContour, edge_width
+from util import getContour, edge_width
 
 cap = None
 
@@ -282,7 +282,6 @@ def get_video_capture(video_path):
     global cap
 
     if cap is not None:
-        print('cap release')
         cap.release()
 
     cap = cv2.VideoCapture(video_path)    
