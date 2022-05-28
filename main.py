@@ -5,6 +5,7 @@ import random
 import argparse
 import glob
 import cv2
+from PIL import Image, ImageFilter
 import numpy as np
 from tqdm import tqdm
 from odtk import _corners2rotatedbbox, ODTK
@@ -100,7 +101,7 @@ def rotate_corners(box):
 
     return None
 
-def resize_bg_img(bg_img, shape):
+def resize_bg_img(bg_img, img_size):
     h, w = bg_img.shape[:2]
 
     size = min(h, w)
@@ -110,11 +111,11 @@ def resize_bg_img(bg_img, shape):
     y2 = y1 + size
     x2 = x1 + size
     bg_img = bg_img[y1:y2, x1:x2, :]
-    bg_img = cv2.resize(bg_img, dsize=shape[:2])
+    bg_img = cv2.resize(bg_img, dsize=(img_size, img_size))
 
     return bg_img
 
-def make_train_data(frame, bg_img):
+def make_train_data(frame, bg_img, img_size, V_lo):
     # グレー画像
     gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
 
@@ -124,12 +125,13 @@ def make_train_data(frame, bg_img):
     # 輪郭とマスク画像とエッジ画像を得る。
     contour, mask_img, edge_img = getContour(bin_img)
     if contour is None:
-        return
+        return [frame, gray_img, bin_img] + [None] * 4
 
     aug_img = augment_color(frame)
 
     # 元画像にマスクをかける。
-    clip_img = aug_img * mask_img
+    # clip_img = aug_img * mask_img
+    clip_img = aug_img.copy()
 
     cv2.drawContours(clip_img, [ contour ], -1, (255,0,0), edge_width)
 
@@ -147,6 +149,9 @@ def make_train_data(frame, bg_img):
 
     # 最小外接円を描く。
     cv2.circle(clip_img, (int(cx), int(cy)), int(radius), (255,255,255), 1)
+
+    if bg_img is None:
+        return frame, gray_img, bin_img, clip_img, None, None, None
 
     # 画像の高さと幅
     height, width = aug_img.shape[:2]
@@ -195,22 +200,30 @@ def make_train_data(frame, bg_img):
     M = m3[:2,:]
 
     # 画像に変換行列を作用させる。
-    dst_img2 = cv2.warpAffine(clip_img, M, (width, height))
-    aug_img2 = cv2.warpAffine(aug_img, M, (width, height))
+    aug_img2  = cv2.warpAffine(aug_img, M, (width, height))
     mask_img2 = cv2.warpAffine(mask_img, M, (width, height))
-    edge_img2 = cv2.warpAffine(edge_img, M, (width, height))
+
+    bx, by, bw, bh = cv2.boundingRect(mask_img2)
+
+    aug_img2  = aug_img2[  by:(by+bh), bx:(bx+bw), : ]
+    mask_img2 = mask_img2[ by:(by+bh), bx:(bx+bw) ]
 
     # 背景画像を元画像と同じサイズにする。
-    bg_img = resize_bg_img(bg_img, aug_img.shape)             
+    bg_img = resize_bg_img(bg_img, img_size)             
 
-    # 内部のマスクを使って、背景画像と元画像を合成する。
-    compo_img = np.where(mask_img2 == 0, bg_img, aug_img2)
+    # PILフォーマットへ変換する。
+    mask_pil = Image.fromarray(mask_img2)
+    bg_pil   = Image.fromarray(bg_img)
+    aug_pil  = Image.fromarray(aug_img2)
 
-    # 背景と元画像を7対3の割合で合成する。
-    blend_img = cv2.addWeighted(bg_img, 0.7, aug_img2, 0.3, 0.0)
+    for _ in range(1):
+        mask_pil = mask_pil.filter(ImageFilter.MinFilter(3))
 
-    # 縁の部分をブレンドした色で置き換える。
-    compo_img = np.where(edge_img2 == 0, compo_img, blend_img)
+    mask_blur = mask_pil.filter(ImageFilter.GaussianBlur(3))    
+
+    bg_pil.paste(aug_pil, (bx,by), mask_blur)
+
+    compo_img = np.array(bg_pil)
 
     # 頂点に変換行列をかける。
     corners2 = [ np.dot(M, np.array(p + [1])).tolist() for p in box.tolist() ]
@@ -220,22 +233,12 @@ def make_train_data(frame, bg_img):
     if corners2 is None:
         print('slope is None')
         
-        return
-
-    # 座標変換後の外接矩形を描く。
-    cv2.drawContours(dst_img2, [ np.int0(corners2)  ], 0, (0,255,0), 2)
+        return [frame, gray_img, bin_img] + [None] * 4
 
     # バウンディングボックスと回転角を得る。
     bounding_box = _corners2rotatedbbox(corners2)
-    x, y, w, h, theta = bounding_box
 
-    # バウンディングボックスを描く。
-    cv2.rectangle(dst_img2, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
-
-    # バウンディングボックスの左上の頂点の位置に円を描く。
-    cv2.circle(dst_img2, (int(x), int(y)), 10, (255,255,255), -1)
-
-    return frame, gray_img, bin_img, clip_img, dst_img2, compo_img, corners2, bounding_box
+    return frame, gray_img, bin_img, clip_img, compo_img, corners2, bounding_box
 
 def make_image_classes(video_dir):
     image_classes = []
@@ -261,7 +264,8 @@ def parse():
     parser.add_argument('-bg', type=str, help='path to background images')
     parser.add_argument('-o','--output', type=str, help='path to outpu')
     parser.add_argument('-net','--network', type=str, help='odtk or yolov5', default='')
-    parser.add_argument('-dsize', '--data_size', type=int, help='data size', default=1000)
+    parser.add_argument('-dtsz', '--data_size', type=int, help='data size', default=1000)
+    parser.add_argument('-imsz', '--img_size', type=int, help='image size', default=720)
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -276,7 +280,7 @@ def parse():
 
     network_name = args.network.lower()
 
-    return video_dir, bg_img_dir, output_dir, network_name, args.data_size
+    return video_dir, bg_img_dir, output_dir, network_name, args.data_size, args.img_size
 
 def get_video_capture(video_path):
     global cap
@@ -301,7 +305,7 @@ def init_cap(image_class, video_idx):
     return cap
 
 
-def make_training_data(image_classes, bg_img_paths, network, data_size):
+def make_training_data(image_classes, bg_img_paths, network, data_size, img_size):
 
     # 背景画像ファイルのインデックス
     bg_img_idx = 0
@@ -324,18 +328,19 @@ def make_training_data(image_classes, bg_img_paths, network, data_size):
                 bg_img = cv2.imread(bg_img_paths[bg_img_idx])
                 bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
 
-                frame, gray_img, bin_img, clip_img, dst_img2, compo_img, corners2, bounding_box = make_train_data(frame, bg_img)
+                frame, gray_img, bin_img, clip_img, compo_img, corners2, bounding_box = make_train_data(frame, bg_img, img_size, V_lo)
 
-                yield (frame, gray_img, bin_img, clip_img, dst_img2, compo_img)
+                yield
 
-                network.add_image(class_idx, video_idx, pos, compo_img, corners2, bounding_box)
+                if clip_img is not None:
+                    network.add_image(class_idx, video_idx, pos, compo_img, corners2, bounding_box)
 
-                class_data_cnt += 1
+                    class_data_cnt += 1
 
-                if data_size <= class_data_cnt:
-                    # 現在のクラスのテータ数が指定値に達した場合
+                    if data_size <= class_data_cnt:
+                        # 現在のクラスのテータ数が指定値に達した場合
 
-                    break
+                        break
 
             else:
 
@@ -345,7 +350,7 @@ def make_training_data(image_classes, bg_img_paths, network, data_size):
     network.save()
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, network_name, data_size = parse()
+    video_dir, bg_img_dir, output_dir, network_name, data_size, img_size = parse()
 
     print(cv2.getBuildInformation())
 
@@ -365,6 +370,6 @@ if __name__ == '__main__':
     else:
         assert(False)
 
-    iterator = make_training_data(image_classes, bg_img_paths, network, data_size)
+    iterator = make_training_data(image_classes, bg_img_paths, network, data_size, img_size)
     for _ in tqdm(iterator, total=len(image_classes) * data_size):
         pass

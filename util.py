@@ -13,9 +13,18 @@ def setPlaying(window, is_playing):
 
     return is_playing
 
-def show_image(image_element, img):
-    # 256x256のサイズに変換する。
-    img = cv2.resize(img, dsize=(256, 256))       
+def show_image(image_element, img, dsp_size=360):
+    h, w = img.shape[:2]
+
+    if h < w:
+        h = dsp_size * h // w
+        w = dsp_size
+    else:
+        w = dsp_size * w // h
+        h = dsp_size
+
+    # 長辺がdsp_sizeになるようにサイズに変換する。
+    img = cv2.resize(img, dsize=(w, h))       
 
     if len(img.shape) == 3:
         # カラー画像の場合
@@ -32,11 +41,17 @@ def show_image(image_element, img):
         # グレースケール画像からPILフォーマットへ変換する。
         image_pil = Image.fromarray(img)
 
+    bg_pil = Image.fromarray(np.zeros((dsp_size,dsp_size,3), dtype=np.uint8))
+
+    x = (dsp_size - w) // 2
+    y = (dsp_size - h) // 2
+    bg_pil.paste(image_pil, (x,y))
+
     # PILフォーマットからImageTkフォーマットへ変換する。
-    image_tk  = ImageTk.PhotoImage(image_pil) 
+    image_tk  = ImageTk.PhotoImage(bg_pil) 
 
     # 画像を表示する。
-    image_element.update(data=image_tk, size=(256,256))
+    image_element.update(data=image_tk, size=(dsp_size, dsp_size))
 
 
 def center_distance(cx, cy, contour):
@@ -118,9 +133,9 @@ def getContour(bin_img):
     # 重心と画像の中心との距離が最小の輪郭
     contour = contours[center_idx]
 
-    # 輪郭から0と1の二値の内部のマスク画像を作る。
-    mask_img = np.zeros(bin_img.shape + (3,), dtype=np.uint8)
-    cv2.drawContours(mask_img, [ contour ], -1, (1,1,1), -1)
+    # 輪郭から0と255のグレースケールの内部のマスク画像を作る。
+    mask_img = np.zeros(bin_img.shape, dtype=np.uint8)
+    cv2.drawContours(mask_img, [ contour ], -1, 255, -1)
 
     # 輪郭から0と1の二値の縁のマスク画像を作る。
     edge_img = np.zeros(bin_img.shape + (3,), dtype=np.uint8)

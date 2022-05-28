@@ -1,10 +1,13 @@
 import os
+import sys
 import datetime
+import argparse
 import cv2
 import numpy as np
 import PySimpleGUI as sg
 from util import show_image, getContour, setPlaying
 from gui import spin
+from main import make_train_data
 
 playing = False
 writer  = None
@@ -15,29 +18,21 @@ def initWriter():
     """
     global writer
 
-    os.makedirs('capture', exist_ok=True)
+    os.makedirs(f'{output_dir}', exist_ok=True)
 
     now = datetime.datetime.now()
 
-    file_path = f'capture/{now.strftime("%Y-%m-%d-%H-%M-%S")}.mp4'
+    file_path = f'{output_dir}/{now.strftime("%Y-%m-%d-%H-%M-%S")}.mp4'
 
-    writer = cv2.VideoWriter(file_path, fmt, frame_rate, (img_size, img_size)) # ライター作成
+    writer = cv2.VideoWriter(file_path, fmt, frame_rate, (frame_width, frame_height)) # ライター作成
 
 def readCap():
     ret, frame = cap.read()
 
     if frame is None:
         return
-        
-    h, w, c = frame.shape
 
-    s1 = (h - img_size) // 2
-    e1 = s1 + img_size
-
-    s2 = (w - img_size) // 2
-    e2 = s2 + img_size
-
-    img = frame[s1:e1, s2:e2, :]
+    img = frame
 
     show_image(window['-image11-'], img)
 
@@ -52,6 +47,9 @@ def readCap():
     contour, mask_img, edge_img = getContour(bin_img)
     if contour is None:
         return
+
+    mask_img = mask_img[:, :, np.newaxis]
+    mask_img = np.broadcast_to(mask_img, img.shape)
 
     white_img = np.full(img.shape, 255, dtype=np.uint8)
     clip_img = np.where(mask_img == 0, white_img, img)
@@ -77,7 +75,21 @@ resolutions = [
     [ 1920, 1080 ]
 ]
 
+def parse():
+    parser = argparse.ArgumentParser(description='Auto Image Tag')
+    parser.add_argument('-o','--output', type=str, help='path to outpu', default='capture')
+    parser.add_argument('-imsz', '--img_size', type=int, help='image size', default=720)
+
+    args = parser.parse_args(sys.argv[1:])
+
+    # 出力先フォルダのパス
+    output_dir = args.output.replace('\\', '/')
+
+    return output_dir, args.img_size
+
 if __name__ == '__main__':
+    output_dir, img_size = parse()
+
     cap = cv2.VideoCapture(0) # 任意のカメラ番号に変更する
 
     brightness = int(cap.get(cv2.CAP_PROP_BRIGHTNESS))
@@ -90,22 +102,22 @@ if __name__ == '__main__':
     print('FPS'       , cap.get(cv2.CAP_PROP_FPS))
     print('AUTO EXPOSURE', cap.get(cv2.CAP_PROP_AUTO_EXPOSURE))
 
-    WIDTH  = 960
-    HEIGHT = 720
+    # WIDTH  = 960
+    # HEIGHT = 720
 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
+    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
+    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
 
-    assert int(cap.get(cv2.CAP_PROP_FRAME_WIDTH )) == WIDTH
-    assert int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) == HEIGHT
+    # assert int(cap.get(cv2.CAP_PROP_FRAME_WIDTH )) == WIDTH
+    # assert int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) == HEIGHT
 
-    WIDTH  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    HEIGHT = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    img_size   = min(WIDTH, HEIGHT)
+    # img_size   = min(WIDTH, HEIGHT)
 
-    print('WIDTH'     , WIDTH)
-    print('HEIGHT'    , HEIGHT)
+    print('WIDTH'     , frame_width)
+    print('HEIGHT'    , frame_height)
 
 
     frame_rate = cap.get(cv2.CAP_PROP_FPS)

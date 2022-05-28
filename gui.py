@@ -1,6 +1,7 @@
 import os
 import sys
 import glob
+import numpy as np
 import cv2
 import PySimpleGUI as sg
 from util import show_image, setPlaying
@@ -19,8 +20,8 @@ video_Idx = 0
 
 def spin(label, key, val, min_val, max_val):
     return [ 
-        sg.Text(label, size=(6,1)), sg.Text("", size=(6,1)), 
-        sg.Spin(list(range(min_val, max_val + 1)), initial_value=val, size=(10, 1), key=key, enable_events=True )
+        sg.Text(label, size=(8,1)),
+        sg.Spin(list(range(min_val, max_val + 1)), initial_value=val, size=(5, 1), key=key, enable_events=True )
     ]
 
 def init_capture(class_idx, video_Idx):
@@ -49,24 +50,6 @@ def init_capture(class_idx, video_Idx):
 
     return cap
 
-def showImage(frame, gray_img, bin_img, clip_img, dst_img2, compo_img):
-
-    # 原画を表示する。
-    show_image(window['-image11-'], frame)
-
-    # グレー画像を表示する。
-    show_image(window['-image12-'], gray_img)
-
-    # 二値画像を表示する。
-    show_image(window['-image13-'], bin_img)
-
-    # マスクした元画像を表示する。
-    show_image(window['-image21-'], clip_img)
-
-    show_image(window['-image22-'], dst_img2)
-
-    show_image(window['-image23-'], compo_img)
-
 
 def show_videos(class_idx, video_Idx):
     global cap
@@ -93,9 +76,32 @@ def show_videos(class_idx, video_Idx):
                 bg_img = cv2.imread(bg_img_paths[bg_img_idx])
                 bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
 
-                frame, gray_img, bin_img, clip_img, dst_img2, compo_img, corners2, bounding_box = make_train_data(frame, bg_img)
+                frame, gray_img, bin_img, clip_img, compo_img, corners2, bounding_box = make_train_data(frame, bg_img, img_size, V_lo)
+                if clip_img is None:
 
-                showImage(frame, gray_img, bin_img, clip_img, dst_img2, compo_img)
+                    for img, key in zip( [frame, bin_img], [ '-image11-', '-image12-']):
+                        show_image(window[key], img)
+                    yield
+                    continue
+
+                x, y, w, h, theta = bounding_box
+
+                x, y, w, h = np.int32((x, y, w, h))
+
+                dst_img2  = compo_img.copy()
+
+                # 座標変換後の外接矩形を描く。
+                cv2.drawContours(dst_img2, [ np.int0(corners2)  ], 0, (0,255,0), 2)
+
+                # バウンディングボックスを描く。
+                cv2.rectangle(dst_img2, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
+
+                # バウンディングボックスの左上の頂点の位置に円を描く。
+                cv2.circle(dst_img2, (int(x), int(y)), 10, (255,255,255), -1)
+
+                for img, key in zip( [frame, bin_img, clip_img, dst_img2],
+                                     [ '-image11-', '-image12-', '-image21-', '-image22-' ]):
+                    show_image(window[key], img)
 
                 yield
                 continue
@@ -133,7 +139,7 @@ def get_tree_data():
     return treedata
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, network_name, data_size = parse()
+    video_dir, bg_img_dir, output_dir, network_name, data_size, img_size = parse()
 
     print(cv2.getBuildInformation())
 
@@ -150,53 +156,73 @@ if __name__ == '__main__':
 
     sg.theme('DarkAmber')   # Add a touch of color
 
+    dsp_size = 360
     # All the stuff inside your window.
     layout = [  
-        [ sg.Tree(data=treedata,
-                headings=[],
-                auto_size_columns=True,
-                num_rows=24,
-                col0_width=30,
-                key="-tree-",
-                show_expanded=False,
-                enable_events=True),
+        [ 
             sg.Column([
-                [ sg.Image(filename='', size=(256,256), key='-image11-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image21-') ]
+                [  
+                    sg.Tree(data=treedata,
+                        headings=[],
+                        auto_size_columns=True,
+                        num_rows=24,
+                        col0_width=30,
+                        key="-tree-",
+                        show_expanded=False,
+                        enable_events=True)
+                ]
+                ,
+                [  
+                    sg.Frame('二値化', [
+                        spin('明度 閾値', '-Vlo-', V_lo, 0, 255)
+                    ],  expand_x=True)
+                ]
+                ,
+                [  
+                    sg.Frame('データ拡張', [
+                        spin('色相', '-hue-shift-', hue_shift, 0, 30),
+                        spin('彩度', '-saturation-shift-', saturation_shift, 0, 50),
+                        spin('明度', '-value-shift-', value_shift, 0, 50)
+                    ],  expand_x=True)
+                ]
+                ,
+                [  
+                    sg.Frame('学習データ', [
+                        [
+                            sg.Text('1クラス当たりのデータ数'), 
+                            sg.Input(str(data_size), key='-data-size-', size=(6,1))
+                        ]
+                        ,
+                        [
+                            sg.Text('深層学習', size=(8,1)), 
+                            sg.Combo(['ODTK', 'YOLOv5'], default_value = 'YOLOv5', key='-network-', size=(8,1)),
+                            sg.Button('開始', key='-save-all-')
+                        ]
+                    ],  expand_x=True)
+                ]
             ])
             ,
             sg.Column([
-                [ sg.Image(filename='', size=(256,256), key='-image12-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image22-') ]
-            ])
-            ,
-            sg.Column([
-                [ sg.Image(filename='', size=(256,256), key='-image13-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image23-') ]
+                [
+                    sg.Column([
+                        [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image11-') ],
+                        [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image21-') ]
+                    ])
+                    ,
+                    sg.Column([
+                        [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image12-') ],
+                        [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image22-') ]
+                    ])
+                ]
+                ,
+                [ 
+                    sg.Button('Play', key='-play/pause-'), 
+                    sg.Slider(range=(0,100), default_value=0, size=(110,15), orientation='horizontal', change_submits=True, key='-img-pos-') ,
+                    sg.Text('', size=3),
+                    sg.Button('Close')
+                ]
             ])
         ]
-        ,
-        [ sg.Slider(range=(0,100), default_value=0, size=(100,15), orientation='horizontal', change_submits=True, key='-img-pos-') ]
-        ,
-        [ sg.Frame('Color Augmentation', [
-            spin('Hue', '-hue-shift-', hue_shift, 0, 30),
-            spin('Saturation', '-saturation-shift-', saturation_shift, 0, 50),
-            spin('Value', '-value-shift-', value_shift, 0, 50)
-        ])]
-        ,
-        spin('V lo', '-Vlo-', V_lo, 0, 255)
-        ,
-        [ sg.Frame('Training Data', [
-            [
-                sg.Text('data size per class', size=(6,1)), 
-                sg.Input(str(data_size), key='-data-size-', size=(6,1)),
-                sg.Text('network', size=(6,1)), 
-                sg.Combo(['ODTK', 'YOLOv5'], default_value = 'YOLOv5', key='-network-'),
-                sg.Button('start', key='-save-all-')
-            ]
-        ])]
-        ,
-        [ sg.Button('Play', key='-play/pause-'), sg.Button('Close')] 
     ]
 
     # Create the Window
@@ -277,7 +303,7 @@ if __name__ == '__main__':
             else:
                 assert(False)
 
-            iterator = make_training_data(image_classes, bg_img_paths, network, data_size)
+            iterator = make_training_data(image_classes, bg_img_paths, network, data_size, img_size)
 
             total_data_size = data_size * len(image_classes)
             for idx, ret in enumerate(iterator):
