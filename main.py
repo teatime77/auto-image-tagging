@@ -51,9 +51,20 @@ class CaptureIterator(object):
         raise StopIteration()
 
 
-def augment_color(img):
+def augment_color(img, hsv_shift):
+    """画像の色を変化させてデータ拡張をする。
+
+    Args:
+        img : 入力画像
+        hsv_shift : HSVの変化量
+
+    Returns:
+        データ拡張をした画像
+    """
     # BGRからHSVに変える。
     hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) 
+
+    hue_shift, saturation_shift, value_shift = hsv_shift
 
     # HSVの各チャネルに対し
     for channel, shift in enumerate([hue_shift, saturation_shift, value_shift]):
@@ -63,10 +74,14 @@ def augment_color(img):
         # 変化量を乱数で決める。
         change = np.random.randint(-shift, shift)
 
+        # 指定したチャネルのデータ
+        data = hsv_img[:, :, channel]
+
         if channel == 0:
             # 色相の場合
 
-            data = hsv_img[:, :, channel].astype(np.int32)
+            # int32型に変換する。
+            data = data.astype(np.int32)
 
             # 変化後の色相が0～180の範囲に入るように色相をずらす。
             data = (data + change + 180) % 180
@@ -74,7 +89,8 @@ def augment_color(img):
         else:
             # 彩度や明度の場合
 
-            data  = hsv_img[:, :, channel].astype(np.float32)
+            # float32型に変換する。
+            data  = data.astype(np.float32)
 
             # 変化量は百分率(%)として作用させる。
             data  = (data * ((100 + change) / 100.0) ).clip(0, 255)
@@ -115,23 +131,20 @@ def resize_bg_img(bg_img, img_size):
 
     return bg_img
 
-def make_train_data(frame, bg_img, img_size, V_lo):
+def make_train_data(frame, bg_img, img_size, V_lo, hsv_shift):
     # グレー画像
     gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
 
     # 二値画像
     bin_img = 255 - cv2.inRange(gray_img, V_lo, 255)
 
-    # 輪郭とマスク画像とエッジ画像を得る。
+    # 二値化画像から輪郭とマスク画像を得る。
     contour, mask_img = getContour(bin_img)
     if contour is None:
-        return [frame, gray_img, bin_img] + [None] * 4
+        return [bin_img] + [None] * 6
 
-    aug_img = augment_color(frame)
-
-    # 元画像にマスクをかける。
-    # clip_img = aug_img * mask_img
-    clip_img = aug_img.copy()
+    # 画像の色を変化させてデータ拡張をする。
+    aug_img = augment_color(frame, hsv_shift)
 
     # 回転を考慮した外接矩形を得る。
     rect = cv2.minAreaRect(contour)
@@ -139,17 +152,11 @@ def make_train_data(frame, bg_img, img_size, V_lo):
     # 外接矩形の頂点
     box = cv2.boxPoints(rect)
 
-    # 外接矩形を描く。
-    cv2.drawContours(clip_img, [ np.int0(box) ], 0, (0,255,0), 2)
-
     # 最小外接円の中心と半径
     (cx, cy), radius = cv2.minEnclosingCircle(contour)    
 
-    # 最小外接円を描く。
-    cv2.circle(clip_img, (int(cx), int(cy)), int(radius), (255,255,255), 1)
-
     if bg_img is None:
-        return frame, gray_img, bin_img, clip_img, None, None, None
+        return [bin_img] + [None] * 6
 
     # 画像の高さと幅
     height, width = aug_img.shape[:2]
@@ -206,7 +213,7 @@ def make_train_data(frame, bg_img, img_size, V_lo):
     aug_img2  = aug_img2[  by:(by+bh), bx:(bx+bw), : ]
     mask_img2 = mask_img2[ by:(by+bh), bx:(bx+bw) ]
 
-    # 背景画像を元画像と同じサイズにする。
+    # 背景画像を指定したサイズにする。
     bg_img = resize_bg_img(bg_img, img_size)             
 
     # PILフォーマットへ変換する。
@@ -214,13 +221,16 @@ def make_train_data(frame, bg_img, img_size, V_lo):
     bg_pil   = Image.fromarray(bg_img)
     aug_pil  = Image.fromarray(aug_img2)
 
-    for _ in range(1):
-        mask_pil = mask_pil.filter(ImageFilter.MinFilter(3))
+    # マスク画像を 収縮(erosion)する。
+    mask_pil = mask_pil.filter(ImageFilter.MinFilter(3))
 
+    # 輪郭の周辺部分にガウシアンでぼかしを入れる。
     mask_blur = mask_pil.filter(ImageFilter.GaussianBlur(3))    
 
+    # マスク画像を使って、データ拡張後の画像を背景画像に貼り付ける。
     bg_pil.paste(aug_pil, (bx,by), mask_blur)
 
+    # 貼り付け後の画像をnumpyの配列に変換する。
     compo_img = np.array(bg_pil)
 
     # 頂点に変換行列をかける。
@@ -231,12 +241,12 @@ def make_train_data(frame, bg_img, img_size, V_lo):
     if corners2 is None:
         print('slope is None')
         
-        return [frame, gray_img, bin_img] + [None] * 4
+        return [bin_img] + [None] * 6
 
     # バウンディングボックスと回転角を得る。
     bounding_box = _corners2rotatedbbox(corners2)
 
-    return frame, gray_img, bin_img, clip_img, compo_img, corners2, bounding_box
+    return bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box
 
 def make_image_classes(video_dir):
     image_classes = []
@@ -326,11 +336,10 @@ def make_training_data(image_classes, bg_img_paths, network, data_size, img_size
                 bg_img = cv2.imread(bg_img_paths[bg_img_idx])
                 bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
 
-                frame, gray_img, bin_img, clip_img, compo_img, corners2, bounding_box = make_train_data(frame, bg_img, img_size, V_lo)
+                hsv_shift = (hue_shift, saturation_shift, value_shift)
+                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, V_lo, hsv_shift)
 
-                yield
-
-                if clip_img is not None:
+                if mask_img is not None:
                     network.add_image(class_idx, video_idx, pos, compo_img, corners2, bounding_box)
 
                     class_data_cnt += 1
@@ -339,6 +348,8 @@ def make_training_data(image_classes, bg_img_paths, network, data_size, img_size
                         # 現在のクラスのテータ数が指定値に達した場合
 
                         break
+
+                yield
 
             else:
 

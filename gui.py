@@ -7,13 +7,20 @@ import PySimpleGUI as sg
 from util import show_image, setPlaying
 from odtk import ODTK
 from yolo_v5 import YOLOv5
-from main import parse, hue_shift, saturation_shift, value_shift, V_lo
+from main import parse, V_lo
 from main import make_train_data, make_image_classes, make_training_data, get_video_capture
 
 iterator = None
 network = None
 cap = None
 playing = False
+show_rect = True
+use_same_bg_img = False
+
+hue_shift = 10
+saturation_shift = 15
+value_shift = 15
+
 
 class_idx = 0
 video_Idx = 0
@@ -57,6 +64,8 @@ def show_videos(class_idx, video_Idx):
     # 背景画像ファイルのインデックス
     bg_img_idx = 0
 
+    prev_bg_img = None
+
     while class_idx < len(image_classes):
         cap = init_capture(class_idx, video_Idx)
         print('init cap')
@@ -72,34 +81,52 @@ def show_videos(class_idx, video_Idx):
                 # 動画の現在位置の表示を更新する。
                 window['-img-pos-'].update(value=pos)
 
-                # 背景画像ファイルを読む。
-                bg_img = cv2.imread(bg_img_paths[bg_img_idx])
-                bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
+                if use_same_bg_img and prev_bg_img is not None:
+                    bg_img = prev_bg_img
 
-                frame, gray_img, bin_img, clip_img, compo_img, corners2, bounding_box = make_train_data(frame, bg_img, img_size, V_lo)
-                if clip_img is None:
+                else:
+                    # 背景画像ファイルを読む。
+                    bg_img = cv2.imread(bg_img_paths[bg_img_idx])
+                    bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
 
-                    for img, key in zip( [frame, bin_img], [ '-image11-', '-image12-']):
+                prev_bg_img = bg_img
+
+                hsv_shift = (hue_shift, saturation_shift, value_shift)
+                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, V_lo, hsv_shift)
+                if mask_img is None:
+
+                    black_img = np.zeros(frame.shape, dtype=np.uint8)
+                    for img, key in zip( [frame, bin_img, black_img, black_img], [ '-image11-', '-image12-', '-image21-', '-image22-']):
                         show_image(window[key], img)
                     yield
                     continue
 
-                x, y, w, h, theta = bounding_box
+                # 元画像にマスクをかける。
+                mask3_img = np.broadcast_to(mask_img[:, :, np.newaxis], aug_img.shape)
+                clip_img = np.where(mask3_img == 0, mask3_img, aug_img)
 
-                x, y, w, h = np.int32((x, y, w, h))
+                compo_img  = compo_img.copy()
 
-                dst_img2  = compo_img.copy()
+                if show_rect:
 
-                # 座標変換後の外接矩形を描く。
-                cv2.drawContours(dst_img2, [ np.int0(corners2)  ], 0, (0,255,0), 2)
+                    # 外接矩形を描く。
+                    cv2.drawContours(clip_img, [ np.int0(box) ], 0, (0,255,0), 2)
 
-                # バウンディングボックスを描く。
-                cv2.rectangle(dst_img2, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
+                    x, y, w, h, theta = bounding_box
 
-                # バウンディングボックスの左上の頂点の位置に円を描く。
-                cv2.circle(dst_img2, (int(x), int(y)), 10, (255,255,255), -1)
+                    x, y, w, h = np.int32((x, y, w, h))
 
-                for img, key in zip( [frame, bin_img, clip_img, dst_img2],
+
+                    # 座標変換後の外接矩形を描く。
+                    cv2.drawContours(compo_img, [ np.int0(corners2)  ], 0, (0,255,0), 2)
+
+                    # バウンディングボックスを描く。
+                    cv2.rectangle(compo_img, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
+
+                    # バウンディングボックスの左上の頂点の位置に円を描く。
+                    cv2.circle(compo_img, (int(x), int(y)), 10, (255,255,255), -1)
+
+                for img, key in zip( [frame, bin_img, clip_img, compo_img],
                                      [ '-image11-', '-image12-', '-image21-', '-image22-' ]):
                     show_image(window[key], img)
 
@@ -137,6 +164,25 @@ def get_tree_data():
             treedata.Insert(img_class.name, video_path, video_name, values=[video_path])
 
     return treedata
+
+def show_one_frame(event):
+    global iterator, use_same_bg_img
+
+    if cap is not None:
+        pos = max(0, int(values['-img-pos-']) - 1)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+
+        use_same_bg_img = (event != '-img-pos-')
+
+        if not playing and iterator is not None:
+            try:
+                iterator.__next__()
+
+            except StopIteration:
+                iterator = None
+
+        use_same_bg_img = False
+
 
 if __name__ == '__main__':
     video_dir, bg_img_dir, output_dir, network_name, data_size, img_size = parse()
@@ -200,6 +246,12 @@ if __name__ == '__main__':
                         ]
                     ],  expand_x=True)
                 ]
+                ,
+                [  
+                    sg.Frame('表示', [
+                        [ sg.Checkbox('矩形を表示', default=show_rect, enable_events=True, key='-show-rect-') ]
+                    ],  expand_x=True)
+                ]
             ])
             ,
             sg.Column([
@@ -214,14 +266,12 @@ if __name__ == '__main__':
                         [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image22-') ]
                     ])
                 ]
-                ,
-                [ 
-                    sg.Button('Play', key='-play/pause-'), 
-                    sg.Slider(range=(0,100), default_value=0, size=(110,15), orientation='horizontal', change_submits=True, key='-img-pos-') ,
-                    sg.Text('', size=3),
-                    sg.Button('Close')
-                ]
             ])
+        ]
+        ,
+        [ 
+            sg.Button('Play ', key='-play/pause-'), 
+            sg.Slider(range=(0,100), default_value=0, size=(111,15), orientation='horizontal', change_submits=True, key='-img-pos-')
         ]
     ]
 
@@ -234,7 +284,7 @@ if __name__ == '__main__':
         # event, values = window.read()
         event, values = window.read(timeout=1)
 
-        if event == sg.WIN_CLOSED or event == 'Close': # if user closes window or clicks cancel
+        if event == sg.WIN_CLOSED:
             break
 
         if event == '-tree-':
@@ -256,15 +306,23 @@ if __name__ == '__main__':
 
         elif event == '-Vlo-':
             V_lo = int(values[event])
+            show_one_frame(event)
 
         elif event == '-hue-shift-':
             hue_shift = int(values[event])
+            show_one_frame(event)
 
         elif event == '-saturation-shift-':
             saturation_shift = int(values[event])
+            show_one_frame(event)
 
         elif event == '-value-shift-':
             value_shift = int(values[event])
+            show_one_frame(event)
+
+        elif event == '-show-rect-':
+            show_rect = values[event]
+            show_one_frame(event)
 
         elif event == '__TIMEOUT__':
             if playing and iterator is not None:
@@ -275,15 +333,7 @@ if __name__ == '__main__':
                     iterator = None
 
         elif event == '-img-pos-':
-            if cap is not None:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, int(values['-img-pos-']))
-
-                if not playing and iterator is not None:
-                    try:
-                        iterator.__next__()
-
-                    except StopIteration:
-                        iterator = None
+            show_one_frame(event)
 
         elif event == '-play/pause-':
             playing = setPlaying(window, not playing)
@@ -313,7 +363,10 @@ if __name__ == '__main__':
 
                 if idx == total_data_size - 1:
                     sg.popup_ok('training data is created.')
+                    break
             
+            iterator = None
+
 
 
         else:

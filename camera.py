@@ -7,7 +7,6 @@ import numpy as np
 import PySimpleGUI as sg
 from util import show_image, getContour, setPlaying
 from gui import spin
-from main import make_train_data
 
 playing = False
 writer  = None
@@ -44,6 +43,7 @@ def readCap():
     bin_img = 255 - cv2.inRange(gray_img, V_lo, 255)
     show_image(window['-image22-'], bin_img)
 
+    # 二値化画像から輪郭とマスク画像を得る。
     contour, mask_img = getContour(bin_img)
     if contour is None:
         return

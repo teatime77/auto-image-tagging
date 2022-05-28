@@ -7,7 +7,7 @@ def setPlaying(window, is_playing):
     if is_playing:
         window['-play/pause-'].update(text='Pause')
     else:
-        window['-play/pause-'].update(text='Play')
+        window['-play/pause-'].update(text='Play ')
 
     return is_playing
 
@@ -86,7 +86,7 @@ def bounding_rect_len(img_width, img_height, contour):
     return (w + h) / (img_width + img_height)
 
 def getContour(bin_img):
-    """二値化画像から輪郭を得る。
+    """二値化画像から輪郭とマスク画像を得る。
 
     Args:
         bin_img (_type_): 二値化画像
@@ -110,7 +110,7 @@ def getContour(bin_img):
         # 輪郭がない場合
 
         print('side len')
-        return [None] * 3
+        return [None, None]
 
     # 外接矩形の辺の長さが画像の辺の長さの90%以上の輪郭は除く。
     contours = [ c for c in contours if 0.9 > bounding_rect_len(img_width, img_height, c) ]
@@ -119,7 +119,7 @@ def getContour(bin_img):
         # 輪郭がない場合
 
         print('area check')
-        return [None] * 3
+        return [None, None]
 
     # 画像の中心
     cx = img_width  / 2
