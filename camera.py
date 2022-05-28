@@ -44,7 +44,7 @@ def readCap():
     bin_img = 255 - cv2.inRange(gray_img, V_lo, 255)
     show_image(window['-image22-'], bin_img)
 
-    contour, mask_img, edge_img = getContour(bin_img)
+    contour, mask_img = getContour(bin_img)
     if contour is None:
         return
 

@@ -10,7 +10,7 @@ import numpy as np
 from tqdm import tqdm
 from odtk import _corners2rotatedbbox, ODTK
 from yolo_v5 import YOLOv5
-from util import getContour, edge_width
+from util import getContour
 
 cap = None
 
@@ -123,7 +123,7 @@ def make_train_data(frame, bg_img, img_size, V_lo):
     bin_img = 255 - cv2.inRange(gray_img, V_lo, 255)
 
     # 輪郭とマスク画像とエッジ画像を得る。
-    contour, mask_img, edge_img = getContour(bin_img)
+    contour, mask_img = getContour(bin_img)
     if contour is None:
         return [frame, gray_img, bin_img] + [None] * 4
 
@@ -132,8 +132,6 @@ def make_train_data(frame, bg_img, img_size, V_lo):
     # 元画像にマスクをかける。
     # clip_img = aug_img * mask_img
     clip_img = aug_img.copy()
-
-    cv2.drawContours(clip_img, [ contour ], -1, (255,0,0), edge_width)
 
     # 回転を考慮した外接矩形を得る。
     rect = cv2.minAreaRect(contour)

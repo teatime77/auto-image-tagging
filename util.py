@@ -3,8 +3,6 @@ import numpy as np
 import cv2
 from PIL import Image, ImageTk
 
-edge_width = 10
-
 def setPlaying(window, is_playing):
     if is_playing:
         window['-play/pause-'].update(text='Pause')
@@ -137,8 +135,4 @@ def getContour(bin_img):
     mask_img = np.zeros(bin_img.shape, dtype=np.uint8)
     cv2.drawContours(mask_img, [ contour ], -1, 255, -1)
 
-    # 輪郭から0と1の二値の縁のマスク画像を作る。
-    edge_img = np.zeros(bin_img.shape + (3,), dtype=np.uint8)
-    cv2.drawContours(edge_img, [ contour ], -1, (1,1,1), edge_width)
-
-    return contour, mask_img, edge_img
+    return contour, mask_img
