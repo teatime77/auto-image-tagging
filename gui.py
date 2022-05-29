@@ -7,7 +7,7 @@ import PySimpleGUI as sg
 from util import show_image, setPlaying
 from odtk import ODTK
 from yolo_v5 import YOLOv5
-from main import parse, V_lo
+from main import parse
 from main import make_train_data, make_image_classes, make_training_data, get_video_capture
 
 iterator = None
@@ -16,6 +16,9 @@ cap = None
 playing = False
 show_rect = True
 use_same_bg_img = False
+
+# 明度の閾値(最小値)
+v_min = 130
 
 hue_shift = 10
 saturation_shift = 15
@@ -92,7 +95,7 @@ def show_videos(class_idx, video_Idx):
                 prev_bg_img = bg_img
 
                 hsv_shift = (hue_shift, saturation_shift, value_shift)
-                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, V_lo, hsv_shift)
+                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, v_min, hsv_shift)
                 if mask_img is None:
 
                     black_img = np.zeros(frame.shape, dtype=np.uint8)
@@ -165,7 +168,12 @@ def get_tree_data():
 
     return treedata
 
-def show_one_frame(event):
+def update_one_frame(event : str):
+    """現在のフレームの表示を更新する。
+
+    Args:
+        event : イベント
+    """
     global iterator, use_same_bg_img
 
     if cap is not None:
@@ -185,7 +193,8 @@ def show_one_frame(event):
 
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, network_name, data_size, img_size = parse()
+    video_dir, bg_img_dir, output_dir, network_name, data_size, img_size, v_min, hsv_shift = parse()
+    hue_shift, saturation_shift, value_shift = hsv_shift
 
     print(cv2.getBuildInformation())
 
@@ -220,7 +229,7 @@ if __name__ == '__main__':
                 ,
                 [  
                     sg.Frame('二値化', [
-                        spin('明度 閾値', '-Vlo-', V_lo, 0, 255)
+                        spin('明度 閾値', '-V-min-', v_min, 0, 255)
                     ],  expand_x=True)
                 ]
                 ,
@@ -242,7 +251,7 @@ if __name__ == '__main__':
                         [
                             sg.Text('深層学習', size=(8,1)), 
                             sg.Combo(['ODTK', 'YOLOv5'], default_value = 'YOLOv5', key='-network-', size=(8,1)),
-                            sg.Button('開始', key='-save-all-')
+                            sg.Button('作成開始', key='-save-all-', pad=((50,0),(0,0)))
                         ]
                     ],  expand_x=True)
                 ]
@@ -304,25 +313,26 @@ if __name__ == '__main__':
                 iterator = show_videos(class_idx, video_Idx)
                 playing = setPlaying(window, True)
 
-        elif event == '-Vlo-':
-            V_lo = int(values[event])
-            show_one_frame(event)
+        elif event == '-V-min-':
+            # 明度の閾値(最小値)
+            v_min = int(values[event])
+            update_one_frame(event)
 
         elif event == '-hue-shift-':
             hue_shift = int(values[event])
-            show_one_frame(event)
+            update_one_frame(event)
 
         elif event == '-saturation-shift-':
             saturation_shift = int(values[event])
-            show_one_frame(event)
+            update_one_frame(event)
 
         elif event == '-value-shift-':
             value_shift = int(values[event])
-            show_one_frame(event)
+            update_one_frame(event)
 
         elif event == '-show-rect-':
             show_rect = values[event]
-            show_one_frame(event)
+            update_one_frame(event)
 
         elif event == '__TIMEOUT__':
             if playing and iterator is not None:
@@ -333,7 +343,7 @@ if __name__ == '__main__':
                     iterator = None
 
         elif event == '-img-pos-':
-            show_one_frame(event)
+            update_one_frame(event)
 
         elif event == '-play/pause-':
             playing = setPlaying(window, not playing)
@@ -353,7 +363,8 @@ if __name__ == '__main__':
             else:
                 assert(False)
 
-            iterator = make_training_data(image_classes, bg_img_paths, network, data_size, img_size)
+            hsv_shift = (hue_shift, saturation_shift, value_shift)
+            iterator = make_training_data(image_classes, bg_img_paths, network, data_size, img_size, v_min, hsv_shift)
 
             total_data_size = data_size * len(image_classes)
             for idx, ret in enumerate(iterator):

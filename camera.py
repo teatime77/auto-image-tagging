@@ -10,7 +10,9 @@ from gui import spin
 
 playing = False
 writer  = None
-V_lo = 253
+
+# 明度の閾値(最小値)
+v_min = 130
 
 def initWriter():
     """動画ファイルへのライターを初期化する。
@@ -40,7 +42,7 @@ def readCap():
     show_image(window['-image12-'], gray_img)
 
     # 二値画像を表示する。
-    bin_img = 255 - cv2.inRange(gray_img, V_lo, 255)
+    bin_img = 255 - cv2.inRange(gray_img, v_min, 255)
     show_image(window['-image22-'], bin_img)
 
     # 二値化画像から輪郭とマスク画像を得る。
@@ -149,7 +151,7 @@ if __name__ == '__main__':
             ])
         ]
         ,
-        spin('V lo', '-Vlo-', V_lo, 0, 255),
+        spin('V lo', '-V-min-', v_min, 0, 255),
         spin('brightness', '-brightness-', brightness, 0, 255),
         spin('exposure', '-exposure-', exposure, -20, 20),
         spin('contrast', '-contrast-', contrast,   0, 255)
@@ -176,8 +178,9 @@ if __name__ == '__main__':
                 writer.release()
                 writer = None
 
-        elif event == '-Vlo-':
-            V_lo = int(values[event])
+        elif event == '-V-min-':
+            # 明度の閾値(最小値)
+            v_min = int(values[event])
 
         elif event == '-brightness-':
             brightness = int(values[event])

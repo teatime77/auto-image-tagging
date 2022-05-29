@@ -23,8 +23,6 @@ value_shift = 15
 
 classIdx = 0
 
-V_lo = 250
-
 S_mag =  100
 V_mag =  100
 
@@ -36,19 +34,6 @@ class ImageClass:
         self.name = name
         self.classDir = class_dir
         self.videoPathes = []
-
-class CaptureIterator(object):
-    def __init__(self):
-        pass
-
-    def __iter__(self):
-    #     return self
-
-    # def __next__(self):
-        for i in range(10):
-            yield i
-
-        raise StopIteration()
 
 
 def augment_color(img, hsv_shift):
@@ -100,78 +85,31 @@ def augment_color(img, hsv_shift):
 
     # HSVからBGRに変える。
     return cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
-        
 
-def rotate_corners(box):
-    rad45 = math.radians(45)
+def augment_shape(aug_img : np.ndarray, mask_img : np.ndarray, contour : np.ndarray, img_size : int) -> np.ndarray:
+    """画像を回転・拡大/縮小・平行移動してデータ拡張をする。
 
-    for i1 in range(4):
-        i2 = (i1 + 1) % 4
+    Args:
+        aug_img : 入力画像
+        mask_img : マスク画像
+        contour : 輪郭
+        img_size : 貼り付け先の画像のサイズ
 
-        dx = box[i2][0] - box[i1][0]
-        dy = box[i2][1] - box[i1][1]
-
-        theta = math.atan2(dy, dx)
-        if abs(theta) <= rad45:
-            return box[i1:] + box[:i1]
-
-    return None
-
-def resize_bg_img(bg_img, img_size):
-    h, w = bg_img.shape[:2]
-
-    size = min(h, w)
-    y1 = (h - size) // 2
-    x1 = (w - size) // 2
-
-    y2 = y1 + size
-    x2 = x1 + size
-    bg_img = bg_img[y1:y2, x1:x2, :]
-    bg_img = cv2.resize(bg_img, dsize=(img_size, img_size))
-
-    return bg_img
-
-def make_train_data(frame, bg_img, img_size, V_lo, hsv_shift):
-    # グレー画像
-    gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-
-    # 二値画像
-    bin_img = 255 - cv2.inRange(gray_img, V_lo, 255)
-
-    # 二値化画像から輪郭とマスク画像を得る。
-    contour, mask_img = getContour(bin_img)
-    if contour is None:
-        return [bin_img] + [None] * 6
-
-    # 画像の色を変化させてデータ拡張をする。
-    aug_img = augment_color(frame, hsv_shift)
-
-    # 回転を考慮した外接矩形を得る。
-    rect = cv2.minAreaRect(contour)
-
-    # 外接矩形の頂点
-    box = cv2.boxPoints(rect)
+    Returns:
+        変換後の画像
+    """
 
     # 最小外接円の中心と半径
     (cx, cy), radius = cv2.minEnclosingCircle(contour)    
-
-    if bg_img is None:
-        return [bin_img] + [None] * 6
-
-    # 画像の高さと幅
-    height, width = aug_img.shape[:2]
-
-    # 画像の短辺の長さ
-    min_size = min(height, width)
 
     # 物体の直径
     diameter = 2 * radius
 
     # 最大スケール = 画像の短辺の30% ÷ 物体の直径
-    max_scale = (0.3 * min_size) / diameter
+    max_scale = (0.3 * img_size) / diameter
 
     # 最小スケール = 画像の短辺の20% ÷ 物体の直径
-    min_scale = (0.2 * min_size) / diameter
+    min_scale = (0.2 * img_size) / diameter
 
     # 乱数でスケールを決める。
     scale = random.uniform(min_scale, max_scale)
@@ -181,11 +119,11 @@ def make_train_data(frame, bg_img, img_size, V_lo, hsv_shift):
 
     # 乱数で移動量を決める。
     margin = 1
-    dx = random.uniform(radius2 - cx + margin, width - radius2 - cx - margin)
-    dy = random.uniform(radius2 - cy + margin, height - radius2 - cy - margin)
+    dx = random.uniform(radius2 - cx + margin, img_size - radius2 - cx - margin)
+    dy = random.uniform(radius2 - cy + margin, img_size - radius2 - cy - margin)
 
-    assert radius2 <= cx + dx and cx + dx <= width - radius2
-    assert radius2 <= cy + dy and cy + dy <= height - radius2
+    assert radius2 <= cx + dx and cx + dx <= img_size - radius2
+    assert radius2 <= cy + dy and cy + dy <= img_size - radius2
 
     # 乱数で回転量を決める。
     angle = random.uniform(-180, 180)
@@ -205,16 +143,28 @@ def make_train_data(frame, bg_img, img_size, V_lo, hsv_shift):
     M = m3[:2,:]
 
     # 画像に変換行列を作用させる。
-    aug_img2  = cv2.warpAffine(aug_img, M, (width, height))
-    mask_img2 = cv2.warpAffine(mask_img, M, (width, height))
+    aug_img2  = cv2.warpAffine(aug_img , M, (img_size, img_size))
+    mask_img2 = cv2.warpAffine(mask_img, M, (img_size, img_size))
 
+    return aug_img2, mask_img2, M
+
+def blend_image(bg_img : np.ndarray, aug_img2 : np.ndarray, mask_img2 : np.ndarray) -> np.ndarray:
+    """マスク画像を使って、画像を背景画像に貼り付ける。
+
+    Args:
+        bg_img : 背景画像
+        aug_img2 : 入力画像
+        mask_img2 : マスク画像
+
+    Returns:
+        貼り付け後の画像
+    """
+    # 外接矩形
     bx, by, bw, bh = cv2.boundingRect(mask_img2)
 
+    # 外接矩形の内部のみを抜き出す。
     aug_img2  = aug_img2[  by:(by+bh), bx:(bx+bw), : ]
     mask_img2 = mask_img2[ by:(by+bh), bx:(bx+bw) ]
-
-    # 背景画像を指定したサイズにする。
-    bg_img = resize_bg_img(bg_img, img_size)             
 
     # PILフォーマットへ変換する。
     mask_pil = Image.fromarray(mask_img2)
@@ -233,6 +183,93 @@ def make_train_data(frame, bg_img, img_size, V_lo, hsv_shift):
     # 貼り付け後の画像をnumpyの配列に変換する。
     compo_img = np.array(bg_pil)
 
+    return compo_img
+
+def rotate_corners(box : list):
+    """最初の頂点から2番目の頂点へ向かう辺の角度が±45°以下になるように、頂点の順番を変える。
+
+    Args:
+        box: 頂点のXY座標のリスト
+
+    Returns:
+        _type_: _description_
+    """
+    
+    rad45 = math.radians(45)
+
+    for i1 in range(4):
+        # 次の頂点のインデックス
+        i2 = (i1 + 1) % 4
+
+        # 次の頂点までのXとYの変位
+        dx = box[i2][0] - box[i1][0]
+        dy = box[i2][1] - box[i1][1]
+
+        theta = math.atan2(dy, dx)
+        if abs(theta) <= rad45:
+            # 次の頂点へ向かう辺の角度が±45°以下の場合
+
+            # i1が最初の頂点になるようにする。
+            return box[i1:] + box[:i1]
+
+    return None
+
+def resize_bg_img(bg_img : np.ndarray, img_size : int) -> np.ndarray:
+    """背景画像を指定したサイズの正方形にする。
+
+    Args:
+        bg_img : 背景画像
+        img_size : 正方形の辺の長さ
+
+    Returns:
+        指定したサイズの正方形の背景画像
+    """
+    # 背景画像の高さと幅
+    h, w = bg_img.shape[:2]
+
+    # 高さと幅の小さい方
+    size = min(h, w)
+
+    # 正方形の画像の開始位置
+    y = (h - size) // 2
+    x = (w - size) // 2
+
+    # 背景画像を正方形にする。
+    bg_img = bg_img[ y:(y+size), x:(x+size), :]
+
+    # 指定したサイズにリサイズする。
+    bg_img = cv2.resize(bg_img, dsize=(img_size, img_size))
+
+    return bg_img
+
+def make_train_data(frame, bg_img, img_size, v_min, hsv_shift):
+    # グレー画像
+    gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+
+    # 二値画像
+    bin_img = 255 - cv2.inRange(gray_img, v_min, 255)
+
+    # 二値化画像から輪郭とマスク画像を得る。
+    contour, mask_img = getContour(bin_img)
+    if contour is None or bg_img is None:
+        return [bin_img] + [None] * 6
+
+    # 画像の色を変化させてデータ拡張をする。
+    aug_img = augment_color(frame, hsv_shift)
+
+    # 回転を考慮した外接矩形を得る。
+    rect = cv2.minAreaRect(contour)
+
+    # 外接矩形の頂点
+    box = cv2.boxPoints(rect)
+
+    aug_img2, mask_img2, M  = augment_shape(aug_img, mask_img, contour, img_size)
+
+    # 背景画像を指定したサイズにする。
+    bg_img = resize_bg_img(bg_img, img_size)             
+
+    compo_img = blend_image(bg_img, aug_img2, mask_img2)
+
     # 頂点に変換行列をかける。
     corners2 = [ np.dot(M, np.array(p + [1])).tolist() for p in box.tolist() ]
 
@@ -245,6 +282,9 @@ def make_train_data(frame, bg_img, img_size, V_lo, hsv_shift):
 
     # バウンディングボックスと回転角を得る。
     bounding_box = _corners2rotatedbbox(corners2)
+
+    x, y, w, h, theta = bounding_box
+    assert 0 <= x and x + w <= img_size and 0 <= y and y + h <= img_size
 
     return bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box
 
@@ -271,9 +311,11 @@ def parse():
     parser.add_argument('-i','--input', type=str, help='path to videos')
     parser.add_argument('-bg', type=str, help='path to background images')
     parser.add_argument('-o','--output', type=str, help='path to outpu')
-    parser.add_argument('-net','--network', type=str, help='odtk or yolov5', default='')
+    parser.add_argument('-net','--network', type=str, help='odtk or yolov5', default='yolov5')
     parser.add_argument('-dtsz', '--data_size', type=int, help='data size', default=1000)
     parser.add_argument('-imsz', '--img_size', type=int, help='image size', default=720)
+    parser.add_argument('-v', '--v_min', type=int, help='Value min', default=130)
+    parser.add_argument('-hsv', '--hsv_shift', type=int, nargs=3, help='color shift', default=(10,15,15))
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -288,7 +330,7 @@ def parse():
 
     network_name = args.network.lower()
 
-    return video_dir, bg_img_dir, output_dir, network_name, args.data_size, args.img_size
+    return video_dir, bg_img_dir, output_dir, network_name, args.data_size, args.img_size, args.v_min, args.hsv_shift
 
 def get_video_capture(video_path):
     global cap
@@ -313,7 +355,7 @@ def init_cap(image_class, video_idx):
     return cap
 
 
-def make_training_data(image_classes, bg_img_paths, network, data_size, img_size):
+def make_training_data(image_classes, bg_img_paths, network, data_size, img_size, v_min, hsv_shift):
 
     # 背景画像ファイルのインデックス
     bg_img_idx = 0
@@ -336,20 +378,19 @@ def make_training_data(image_classes, bg_img_paths, network, data_size, img_size
                 bg_img = cv2.imread(bg_img_paths[bg_img_idx])
                 bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
 
-                hsv_shift = (hue_shift, saturation_shift, value_shift)
-                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, V_lo, hsv_shift)
+                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, v_min, hsv_shift)
 
                 if mask_img is not None:
                     network.add_image(class_idx, video_idx, pos, compo_img, corners2, bounding_box)
 
                     class_data_cnt += 1
 
+                    yield
+
                     if data_size <= class_data_cnt:
                         # 現在のクラスのテータ数が指定値に達した場合
 
                         break
-
-                yield
 
             else:
 
@@ -359,7 +400,8 @@ def make_training_data(image_classes, bg_img_paths, network, data_size, img_size
     network.save()
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, network_name, data_size, img_size = parse()
+    video_dir, bg_img_dir, output_dir, network_name, data_size, img_size, v_min, hsv_shift = parse()
+    hue_shift, saturation_shift, value_shift = hsv_shift
 
     print(cv2.getBuildInformation())
 
@@ -379,6 +421,7 @@ if __name__ == '__main__':
     else:
         assert(False)
 
-    iterator = make_training_data(image_classes, bg_img_paths, network, data_size, img_size)
+    hsv_shift = (hue_shift, saturation_shift, value_shift)
+    iterator = make_training_data(image_classes, bg_img_paths, network, data_size, img_size, v_min, hsv_shift)
     for _ in tqdm(iterator, total=len(image_classes) * data_size):
         pass
