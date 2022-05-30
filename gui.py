@@ -373,6 +373,7 @@ if __name__ == '__main__':
                     break
 
                 if idx == total_data_size - 1:
+                    network.save()
                     sg.popup_ok('training data is created.')
                     break
             
