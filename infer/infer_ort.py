@@ -44,9 +44,6 @@ while True:
     except StopIteration:
         break
 
-    # for img_path in glob.glob(f'{img_dir}/*.png'):
-    #     bmp = cv2.imread(img_path)
-
     img = getInputImg(bmp)
 
     print('start infer')

@@ -37,7 +37,7 @@ def getBox(scores, boxes, shape):
     return cx, cy
 
 def readBmpFiles(img_dir):
-    for img_path in glob.glob(f'{img_dir}/*.png'):
+    for img_path in glob.glob(f'{img_dir}/*.jpg'):
         bmp = cv2.imread(img_path)
 
         yield bmp

@@ -7,7 +7,7 @@ import openvino
 from openvino.runtime import Core
 from openvino.pyopenvino import ConstOutput
 import time
-from infer_tool import getBox, readBmpFiles, getInputImg, receiveBmp, sendBox
+from infer_tool import getBox, getInputImg, receiveBmp, sendBox
 
 ie = Core()
 
@@ -35,7 +35,6 @@ request = compiled_model.create_infer_request()
 
 cv2.namedWindow('window')
 
-# reader = readBmpFiles(img_dir)
 reader = receiveBmp()
 
 while True:
