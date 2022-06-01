@@ -24,10 +24,10 @@ class ODTK:
             "categories":[]
         }
 
-        for i, img_class in enumerate(image_classes):
+        for idx, img_class in enumerate(image_classes):
             o = {
                 "supercategory": f'super-{img_class.name}',
-                "id": i + 1,
+                "id": idx,
                 "name": img_class.name
             }
 
@@ -57,7 +57,7 @@ class ODTK:
         self.AnnoObj["annotations"].append({
             "id" : anno_id,
             "image_id" : image_id, 
-            "category_id" : class_idx + 1,
+            "category_id" : class_idx,
             "bbox" : bounding_box ,
             "segmentation" : corners2,
             "area": bounding_box[2] * bounding_box[3],           # w * h. Required for validation scores
