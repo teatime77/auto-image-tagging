@@ -284,7 +284,9 @@ def make_train_data(frame, bg_img, img_size, v_min, hsv_shift):
     bounding_box = _corners2rotatedbbox(corners2)
 
     x, y, w, h, theta = bounding_box
-    assert 0 <= x and x + w <= img_size and 0 <= y and y + h <= img_size
+    if not (0 <= x and x + w <= img_size and 0 <= y and y + h <= img_size):
+        print(f'x:{x} x+w:{x+w} y:{y} y+h:{y+h} img-size:{img_size}')
+        return [bin_img] + [None] * 6
 
     return bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box
 
@@ -311,7 +313,7 @@ def parse():
     parser.add_argument('-i','--input', type=str, help='path to videos')
     parser.add_argument('-bg', type=str, help='path to background images')
     parser.add_argument('-o','--output', type=str, help='path to outpu')
-    parser.add_argument('-net','--network', type=str, help='odtk or yolov5', default='yolov5')
+    parser.add_argument('-net','--network', type=str, help='odtk or yolov5', default='odtk')
     parser.add_argument('-dtsz', '--data_size', type=int, help='data size', default=1000)
     parser.add_argument('-imsz', '--img_size', type=int, help='image size', default=720)
     parser.add_argument('-v', '--v_min', type=int, help='Value min', default=130)
@@ -403,7 +405,8 @@ if __name__ == '__main__':
     video_dir, bg_img_dir, output_dir, network_name, data_size, img_size, v_min, hsv_shift = parse()
     hue_shift, saturation_shift, value_shift = hsv_shift
 
-    print(cv2.getBuildInformation())
+    # OpenCVのビルド情報を表示する。
+    # print(cv2.getBuildInformation())
 
     # 出力先フォルダを作る。
     os.makedirs(output_dir, exist_ok=True)

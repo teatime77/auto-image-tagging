@@ -70,7 +70,7 @@ def center_distance(cx, cy, contour):
     # 画像の中心から物体の重心までの距離を返す。
     return math.sqrt(dx * dx + dy * dy)
 
-def bounding_rect_len(img_width, img_height, contour):
+def bounding_rect(img_width, img_height, contour):
     """外接矩形の辺の長さを返す。
 
     Args:
@@ -83,7 +83,10 @@ def bounding_rect_len(img_width, img_height, contour):
     """
     x,y,w,h = cv2.boundingRect(contour)
 
-    return (w + h) / (img_width + img_height)
+    if x < 5 or y < 5 or img_width - 5 < x + w or img_height - 5 < y + h:
+        return False
+
+    return (w + h) / (img_width + img_height) < 0.9
 
 def getContour(bin_img):
     """二値化画像から輪郭とマスク画像を得る。
@@ -113,7 +116,7 @@ def getContour(bin_img):
         return [None, None]
 
     # 外接矩形の辺の長さが画像の辺の長さの90%以上の輪郭は除く。
-    contours = [ c for c in contours if 0.9 > bounding_rect_len(img_width, img_height, c) ]
+    contours = [ c for c in contours if bounding_rect(img_width, img_height, c) ]
 
     if len(contours) == 0:
         # 輪郭がない場合
