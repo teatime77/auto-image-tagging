@@ -3,14 +3,6 @@ import numpy as np
 import cv2
 from PIL import Image, ImageTk
 
-def setPlaying(window, is_playing):
-    if is_playing:
-        window['-play/pause-'].update(text='Pause')
-    else:
-        window['-play/pause-'].update(text='Play ')
-
-    return is_playing
-
 def show_image(image_element, img, dsp_size=360):
     h, w = img.shape[:2]
 
@@ -112,8 +104,7 @@ def getContour(bin_img):
     if len(contours) == 0:
         # 輪郭がない場合
 
-        print('side len')
-        return [None, None]
+        return [ 'side len', None, None]
 
     # 外接矩形の辺の長さが画像の辺の長さの90%以上の輪郭は除く。
     contours = [ c for c in contours if bounding_rect(img_width, img_height, c) ]
@@ -121,8 +112,7 @@ def getContour(bin_img):
     if len(contours) == 0:
         # 輪郭がない場合
 
-        print('area check')
-        return [None, None]
+        return [ 'area check', None, None]
 
     # 画像の中心
     cx = img_width  / 2
@@ -138,4 +128,4 @@ def getContour(bin_img):
     mask_img = np.zeros(bin_img.shape, dtype=np.uint8)
     cv2.drawContours(mask_img, [ contour ], -1, 255, -1)
 
-    return contour, mask_img
+    return '', contour, mask_img

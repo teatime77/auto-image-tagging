@@ -4,9 +4,8 @@ import glob
 import numpy as np
 import cv2
 import PySimpleGUI as sg
-from util import show_image, setPlaying
+from util import show_image
 from odtk import ODTK
-from yolo_v5 import YOLOv5
 from main import parse
 from main import make_train_data, make_image_classes, make_training_data, get_video_capture
 
@@ -30,9 +29,17 @@ video_Idx = 0
 
 def spin(label, key, val, min_val, max_val):
     return [ 
-        sg.Text(label, size=(8,1)),
+        sg.Text(label, size=(12,1)),
         sg.Spin(list(range(min_val, max_val + 1)), initial_value=val, size=(5, 1), key=key, enable_events=True )
     ]
+
+def setPlaying(window, is_playing):
+    if is_playing:
+        window['-play/pause-'].update(text='休止')
+    else:
+        window['-play/pause-'].update(text='再生')
+
+    return is_playing
 
 def init_capture(class_idx, video_Idx):
     """動画のキャプチャーの初期処理をする。
@@ -209,11 +216,10 @@ if __name__ == '__main__':
     # ツリー表示のデータを作る。
     treedata = get_tree_data()
 
-    sg.theme('DarkAmber')   # Add a touch of color
-
     dsp_size = 360
-    # All the stuff inside your window.
-    layout = [  
+    font_str = 'Any 12'
+
+    layout = [
         [ 
             sg.Column([
                 [  
@@ -229,8 +235,8 @@ if __name__ == '__main__':
                 ,
                 [  
                     sg.Frame('二値化', [
-                        spin('明度 閾値', '-V-min-', v_min, 0, 255)
-                    ],  expand_x=True)
+                        spin('明度の閾値', '-V-min-', v_min, 0, 255)
+                    ],  expand_x=True, pad=((0,0),(10,10)) )
                 ]
                 ,
                 [  
@@ -238,7 +244,7 @@ if __name__ == '__main__':
                         spin('色相', '-hue-shift-', hue_shift, 0, 30),
                         spin('彩度', '-saturation-shift-', saturation_shift, 0, 50),
                         spin('明度', '-value-shift-', value_shift, 0, 50)
-                    ],  expand_x=True)
+                    ],  expand_x=True, pad=((0,0),(10,10)) )
                 ]
                 ,
                 [  
@@ -249,11 +255,10 @@ if __name__ == '__main__':
                         ]
                         ,
                         [
-                            sg.Text('深層学習', size=(8,1)), 
-                            sg.Combo(['ODTK', 'YOLOv5'], default_value = 'YOLOv5', key='-network-', size=(8,1)),
+                            sg.Push(),
                             sg.Button('作成開始', key='-save-all-', pad=((50,0),(0,0)))
                         ]
-                    ],  expand_x=True)
+                    ],  expand_x=True, pad=((0,0),(10,10)) )
                 ]
                 ,
                 [  
@@ -261,31 +266,60 @@ if __name__ == '__main__':
                         [ sg.Checkbox('矩形を表示', default=show_rect, enable_events=True, key='-show-rect-') ]
                     ],  expand_x=True)
                 ]
-            ])
+            ], vertical_alignment='top', expand_y=True)
             ,
             sg.Column([
                 [
                     sg.Column([
-                        [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image11-') ],
-                        [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image21-') ]
+
+                        [ 
+                            sg.Frame('原画',[
+                                [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image11-') ]
+                            ])
+                        ]
+                        ,
+                        [ 
+                            sg.Frame('物体',[
+                                [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image21-') ]
+                            ])
+                        ]
                     ])
                     ,
                     sg.Column([
-                        [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image12-') ],
-                        [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image22-') ]
+
+                        [ 
+                            sg.Frame('二値画像',[
+                                [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image12-') ]
+                            ])
+                        ]
+                        ,
+                        [ 
+                            sg.Frame('合成画像',[
+                                [ sg.Image(filename='', size=(dsp_size,dsp_size), key='-image22-') ]
+                            ])
+                        ]
                     ])
                 ]
             ])
         ]
         ,
         [ 
-            sg.Button('Play ', key='-play/pause-'), 
-            sg.Slider(range=(0,100), default_value=0, size=(111,15), orientation='horizontal', change_submits=True, key='-img-pos-')
+            sg.Button('再生', key='-play/pause-', size=(6,1)), 
+            sg.Slider(range=(0,100), default_value=0, orientation='horizontal', change_submits=True, key='-img-pos-', expand_x=True),
+        ]
+        ,
+        [
+            sg.Text('', key='-msg-', expand_x=True, relief=sg.RELIEF_SUNKEN ), 
+        ]
+        ,
+        [
+            sg.Push(),
+            sg.Button('閉じる', key='-close-', size=(6,1), pad=((0,0),(10,0)))
         ]
     ]
 
     # Create the Window
-    window = sg.Window('Window Title', layout)
+    window = sg.Window('auto img tab', layout, font=font_str)
 
     cap = None
     iterator = None
@@ -293,7 +327,7 @@ if __name__ == '__main__':
         # event, values = window.read()
         event, values = window.read(timeout=1)
 
-        if event == sg.WIN_CLOSED:
+        if event == sg.WIN_CLOSED or event=='-close-':
             break
 
         if event == '-tree-':
@@ -354,14 +388,7 @@ if __name__ == '__main__':
         elif event == '-save-all-':
             data_size = int(values['-data-size-'])
 
-            if values['-network-'] == 'ODTK':
-                network = ODTK(output_dir, image_classes)
-
-            elif values['-network-'] == 'YOLOv5':
-                network = YOLOv5(output_dir, image_classes)
-
-            else:
-                assert(False)
+            network = ODTK(output_dir, image_classes)
 
             hsv_shift = (hue_shift, saturation_shift, value_shift)
             iterator = make_training_data(image_classes, bg_img_paths, network, data_size, img_size, v_min, hsv_shift)

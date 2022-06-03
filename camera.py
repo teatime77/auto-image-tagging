@@ -5,8 +5,8 @@ import argparse
 import cv2
 import numpy as np
 import PySimpleGUI as sg
-from util import show_image, getContour, setPlaying
-from gui import spin
+from util import show_image, getContour
+
 
 playing = False
 writer  = None
@@ -14,20 +14,58 @@ writer  = None
 # 明度の閾値(最小値)
 v_min = 130
 
+
+standard_resolutions = [
+    [ 1280,  720 ],
+    [  960,  720 ], 
+    [ 1280,  960 ],
+    [  800,  600 ], 
+    [  800,  480 ], 
+    [  640,  480 ]
+]
+
+def init_camera(camera_idx):
+    global cap, brightness, frame_width, frame_height, frame_rate
+    cap = cv2.VideoCapture(camera_idx)
+
+    brightness = int(cap.get(cv2.CAP_PROP_BRIGHTNESS))
+    window['-brightness-'].update(value=brightness)
+
+    print('BRIGHTNESS', brightness)
+
+    for width, height in standard_resolutions:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+        ok = (cap.get(cv2.CAP_PROP_FRAME_WIDTH ) == width and cap.get(cv2.CAP_PROP_FRAME_HEIGHT) == height)
+        print(width, height, ("OK" if ok else "NG"))
+        if ok:
+            break
+
+    frame_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    print('WIDTH'     , frame_width)
+    print('HEIGHT'    , frame_height)
+
+    frame_rate = cap.get(cv2.CAP_PROP_FPS)
+
 def initWriter():
     """動画ファイルへのライターを初期化する。
     """
-    global writer
-
-    os.makedirs(f'{output_dir}', exist_ok=True)
+    global writer, write_path, write_cnt
 
     now = datetime.datetime.now()
 
-    file_path = f'{output_dir}/{now.strftime("%Y-%m-%d-%H-%M-%S")}.mp4'
+    write_path = f'./capture/{now.strftime("%Y-%m-%d-%H-%M-%S")}.mp4'
 
-    writer = cv2.VideoWriter(file_path, fmt, frame_rate, (frame_width, frame_height)) # ライター作成
+    writer = cv2.VideoWriter(write_path, fmt, frame_rate, (frame_width, frame_height))
+
+    write_cnt = 0
 
 def readCap():
+    global frame, write_cnt
+
     ret, frame = cap.read()
 
     if frame is None:
@@ -35,19 +73,25 @@ def readCap():
 
     img = frame
 
-    show_image(window['-image11-'], img)
+    # 原画を表示する。
+    show_image(window['-image1-'], img)
 
-    # グレー画像を表示する。
+    # グレー画像
     gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) 
-    show_image(window['-image12-'], gray_img)
 
     # 二値画像を表示する。
     bin_img = 255 - cv2.inRange(gray_img, v_min, 255)
-    show_image(window['-image22-'], bin_img)
+    show_image(window['-image2-'], bin_img)
 
     # 二値化画像から輪郭とマスク画像を得る。
-    contour, mask_img = getContour(bin_img)
-    if contour is None:
+    msg, contour, mask_img = getContour(bin_img)
+
+    window['-msg-'].update(value=msg)
+
+    if msg != '':
+
+        black_img = np.zeros(img.shape, dtype=np.uint8)
+        show_image(window['-image3-'], black_img)
         return
 
     mask_img = mask_img[:, :, np.newaxis]
@@ -60,123 +104,136 @@ def readCap():
         # 画像を1フレーム分として書き込み
         writer.write(clip_img)
 
+        write_cnt += 1
+
     # cv2.drawContours(clip_img, contour_family, -1, (255,0,0), 10)
-    show_image(window['-image21-'], clip_img)
-
-
-resolutions = [
-    [  160,  120 ], 
-    [  352,  288 ], 
-    [  640,  360 ], 
-    [  640,  480 ], 
-    [  800,  600 ], 
-    [ 1024,  576 ], 
-    [  960,  720 ], 
-    [ 1280,  720 ], 
-    [ 1600,  896 ], 
-    [ 1920, 1080 ]
-]
-
-def parse():
-    parser = argparse.ArgumentParser(description='Auto Image Tag')
-    parser.add_argument('-o','--output', type=str, help='path to outpu', default='capture')
-    parser.add_argument('-imsz', '--img_size', type=int, help='image size', default=720)
-
-    args = parser.parse_args(sys.argv[1:])
-
-    # 出力先フォルダのパス
-    output_dir = args.output.replace('\\', '/')
-
-    return output_dir, args.img_size
+    show_image(window['-image3-'], clip_img)
 
 if __name__ == '__main__':
-    output_dir, img_size = parse()
 
-    cap = cv2.VideoCapture(0) # 任意のカメラ番号に変更する
+    # 動画/静止画を保存するフォルダを作る。
+    os.makedirs('./capture', exist_ok=True)
 
-    brightness = int(cap.get(cv2.CAP_PROP_BRIGHTNESS))
-    exposure   = int(cap.get(cv2.CAP_PROP_EXPOSURE))
-    contrast   = int(cap.get(cv2.CAP_PROP_CONTRAST))
+    for idx in range(10):
+        cap = cv2.VideoCapture(idx)
+        if cap.isOpened():
+            print(f'camera {idx}')
+            cap.release()
+        else:
+            num_cameras = idx
+            break
 
-    print('BRIGHTNESS', brightness)
-    print('EXPOSURE'  , exposure)
-    print('CONTRAST'  , contrast)
-    print('FPS'       , cap.get(cv2.CAP_PROP_FPS))
-    print('AUTO EXPOSURE', cap.get(cv2.CAP_PROP_AUTO_EXPOSURE))
+    if num_cameras == 0:
+        print('camera is not connexted')
+        sys.exit(0)
 
-    # WIDTH  = 960
-    # HEIGHT = 720
+    camera_list = [ f'カメラ {i+1}' for i in range(num_cameras) ]
 
-    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
-    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
-
-    # assert int(cap.get(cv2.CAP_PROP_FRAME_WIDTH )) == WIDTH
-    # assert int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) == HEIGHT
-
-    frame_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    # img_size   = min(WIDTH, HEIGHT)
-
-    print('WIDTH'     , frame_width)
-    print('HEIGHT'    , frame_height)
-
-
-    frame_rate = cap.get(cv2.CAP_PROP_FPS)
+    cap = None
+    camera_idx = 0
 
     fmt = cv2.VideoWriter_fourcc('m', 'p', '4', 'v') # ファイル形式(ここではmp4)
-
-    # ret_val , cap_for_exposure = cap.read()
-    # cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-    # cap.set(cv2.CAP_PROP_EXPOSURE , -1)
-
-
-    sg.theme('DarkAmber')   # Add a touch of color
 
     layout = [
         [
             sg.Column([
-                [ sg.Image(filename='', size=(256,256), key='-image11-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image21-') ]
+                [ 
+                    sg.Frame('原画',[
+                        [
+                            sg.Image(filename='', size=(256,256), key='-image1-')
+                        ]
+                    ])
+                ]
+                ,
+                [ 
+                    sg.Frame('物体',[
+                        [
+                            sg.Image(filename='', size=(256,256), key='-image3-')
+                        ]
+                    ])
+                ]
             ])
             ,
             sg.Column([
-                [ sg.Image(filename='', size=(256,256), key='-image12-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image22-') ]
-            ])
-            ,
-            sg.Column([
-                [ sg.Image(filename='', size=(256,256), key='-image13-') ],
-                [ sg.Image(filename='', size=(256,256), key='-image23-') ]
-            ])
+                [ 
+                    sg.Frame('二値画像',[
+                        [
+                            sg.Image(filename='', size=(256,256), key='-image2-')
+                        ]
+                    ])
+                ]
+                ,
+                [ 
+                    sg.Text('カメラ', size=(12,1), pad=((10,0),(20,20)) ), 
+                    sg.Combo(camera_list, default_value=camera_list[camera_idx], size=(8,1), enable_events=True, readonly=True, key='-camera-')
+                ]
+                ,
+                [ 
+                    sg.Text('明度の閾値', size=(12,1), pad=((10,0),(20,20)) ), 
+                    sg.Spin(list(range(0, 255 + 1)), initial_value=v_min, size=(8, 1), key='-V-min-', enable_events=True )
+                ]
+                ,
+                [ 
+                    sg.Text('画像の明るさ', size=(12,1), pad=((10,0),(20,20)) ), 
+                    sg.Spin(list(range(-1, 255 + 1)), initial_value=0, size=(8, 1), key='-brightness-', enable_events=True )
+                ]
+                ,
+                [ 
+                    sg.Button('動画撮影', key='-play/pause-', size=(8,1), pad=((10,0),(20,20)) ),
+                    sg.Push(),
+                    sg.Button('写真撮影', key='-shoot-')
+                ]
+                ,
+                [sg.VPush()]
+                ,
+                [
+                    sg.Push(),
+                    sg.Button('閉じる', key='-close-')
+                ]
+            ], vertical_alignment='top', expand_y=True)
         ]
         ,
-        spin('V lo', '-V-min-', v_min, 0, 255),
-        spin('brightness', '-brightness-', brightness, 0, 255),
-        spin('exposure', '-exposure-', exposure, -20, 20),
-        spin('contrast', '-contrast-', contrast,   0, 255)
-        ,
-        [ sg.Button('Play', key='-play/pause-'), sg.Button('Close') ]
+        [
+            sg.Text('', key='-msg-', expand_x=True, relief=sg.RELIEF_SUNKEN ), 
+        ]
     ]
 
-    window = sg.Window('Window Title', layout)
+    window = sg.Window('カメラ', layout, font='Any 20')
 
     while True:
 
         event, values = window.read(timeout=1)
 
-        if event == sg.WIN_CLOSED or event == 'Close':
+        if event == sg.WIN_CLOSED or event == '-close-':
+            cap.release()
             break
 
+        elif event == '-camera-':
+            cap.release()
+
+            camera_idx = camera_list.index(values[event])
+            init_camera(camera_idx)
+
         elif event == '-play/pause-':
-            playing = setPlaying(window, not playing)
+            playing = not playing
 
             if playing:
+
+                window['-play/pause-'].update(text='停止')
                 initWriter()
 
             else:
+
+                window['-play/pause-'].update(text='動画撮影')
                 writer.release()
                 writer = None
+
+                if write_cnt == 0:
+
+                    sg.popup('物体の画像がありません。')
+
+                    # 動画ファイルを削除する。
+                    os.remove(write_path)
 
         elif event == '-V-min-':
             # 明度の閾値(最小値)
@@ -186,13 +243,14 @@ if __name__ == '__main__':
             brightness = int(values[event])
             cap.set(cv2.CAP_PROP_BRIGHTNESS, brightness)
 
-        elif event == '-exposure-':
-            exposure = int(values[event])
-            cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
-
-        elif event == '-contrast-':
-            contrast = int(values[event])
-            cap.set(cv2.CAP_PROP_CONTRAST, contrast)
+        elif event == '-shoot-':
+            now = datetime.datetime.now()
+            img_path = f'./capture/{now.strftime("%Y-%m-%d-%H-%M-%S")}.jpg'
+            cv2.imwrite(img_path, frame)
 
         elif event == '__TIMEOUT__':
+            if cap is None:
+                camera_idx = 0
+                init_camera(camera_idx)
+
             readCap()

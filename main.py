@@ -250,8 +250,8 @@ def make_train_data(frame, bg_img, img_size, v_min, hsv_shift):
     bin_img = 255 - cv2.inRange(gray_img, v_min, 255)
 
     # 二値化画像から輪郭とマスク画像を得る。
-    contour, mask_img = getContour(bin_img)
-    if contour is None or bg_img is None:
+    msg, contour, mask_img = getContour(bin_img)
+    if msg != '' or bg_img is None:
         return [bin_img] + [None] * 6
 
     # 画像の色を変化させてデータ拡張をする。
@@ -356,6 +356,22 @@ def init_cap(image_class, video_idx):
 
     return cap
 
+def get_total_frame_count(image_class):
+    cnt = 0
+    for video_path in image_class.videoPathes:
+
+        cap = get_video_capture(video_path)    
+
+        if not cap.isOpened():
+            print("動画再生エラー")
+            sys.exit()
+
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cnt += n
+
+        cap.release()
+
+    return cnt
 
 def make_training_data(image_classes, bg_img_paths, network, data_size, img_size, v_min, hsv_shift):
 
@@ -363,6 +379,8 @@ def make_training_data(image_classes, bg_img_paths, network, data_size, img_size
     bg_img_idx = 0
 
     for class_idx, image_class in enumerate(image_classes):
+        total_frame_cnt = get_total_frame_count(image_class)
+
         class_data_cnt = 0
 
         video_idx = 0
@@ -372,6 +390,9 @@ def make_training_data(image_classes, bg_img_paths, network, data_size, img_size
             ret, frame = cap.read()
             if ret:
                 # 画像が取得できた場合
+
+                if data_size < total_frame_cnt and data_size / total_frame_cnt < np.random.rand():
+                    continue
 
                 # 動画の現在位置
                 pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
