@@ -9,7 +9,6 @@ from PIL import Image, ImageFilter
 import numpy as np
 from tqdm import tqdm
 from odtk import _corners2rotatedbbox, ODTK
-from yolo_v5 import YOLOv5
 from util import getContour
 
 cap = None
