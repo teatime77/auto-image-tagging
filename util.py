@@ -3,13 +3,26 @@ import numpy as np
 import cv2
 from PIL import Image, ImageTk
 
-def show_image(image_element, img, dsp_size=360):
+def show_image(image_element, img : np.ndarray):
+    """画像を表示する。
+
+    Args:
+        image_element : Imageエレメント
+        img : 画像
+    """
     h, w = img.shape[:2]
 
+    dsp_size = 360
     if h < w:
+        # 横長の場合
+
+        # 幅をdsp_sizeにして、高さは縦横比が変わらないようにする。
         h = dsp_size * h // w
         w = dsp_size
     else:
+        # 縦長の場合
+
+        # 高さをdsp_sizeにして、幅は縦横比が変わらないようにする。
         w = dsp_size * w // h
         h = dsp_size
 
@@ -31,10 +44,14 @@ def show_image(image_element, img, dsp_size=360):
         # グレースケール画像からPILフォーマットへ変換する。
         image_pil = Image.fromarray(img)
 
-    bg_pil = Image.fromarray(np.zeros((dsp_size,dsp_size,3), dtype=np.uint8))
+    # グレーの背景画像
+    bg_pil = Image.fromarray(np.full((dsp_size,dsp_size,3), 128, dtype=np.uint8))
 
+    # 背景画像の中央に表示されるようにxとyを決める。
     x = (dsp_size - w) // 2
     y = (dsp_size - h) // 2
+
+    # 背景画像の上に画像を貼り付ける。
     bg_pil.paste(image_pil, (x,y))
 
     # PILフォーマットからImageTkフォーマットへ変換する。
@@ -63,31 +80,33 @@ def center_distance(cx, cy, contour):
     return math.sqrt(dx * dx + dy * dy)
 
 def bounding_rect(img_width, img_height, contour):
-    """外接矩形の辺の長さを返す。
+    """輪郭の外接矩形が画像の周辺部になければTrueを返す。
 
     Args:
-        img_width (_type_): 元画像の幅
-        img_height (_type_): 元画像の高さ
-        contour (_type_): 輪郭
+        img_width : 原画の幅
+        img_height : 原画の高さ
+        contour : 輪郭
 
-    Returns:
-        _type_: 輪郭の長さ
+    Returns: 画像の周辺部になければTrue
     """
+
+    # 輪郭の外接矩形の位置とサイズ
     x,y,w,h = cv2.boundingRect(contour)
 
-    if x < 5 or y < 5 or img_width - 5 < x + w or img_height - 5 < y + h:
-        return False
+    # 外接矩形が画像の周辺部になければ、x_okとy_okはTrue
+    margin = 10
+    x_ok = margin < x and x + w < img_width  - margin
+    y_ok = margin < y and y + h < img_height - margin
 
-    return (w + h) / (img_width + img_height) < 0.9
+    return x_ok and y_ok
 
-def getContour(bin_img):
-    """二値化画像から輪郭とマスク画像を得る。
+def getContour(bin_img: np.ndarray):
+    """二値画像から輪郭とマスク画像を得る。
 
     Args:
-        bin_img (_type_): 二値化画像
+        bin_img : 二値化画像
 
-    Returns:
-        _type_: 輪郭
+    Returns: 輪郭とマスク画像
     """
 
     # 二値化画像から輪郭のリストを得る。
@@ -99,20 +118,20 @@ def getContour(bin_img):
     # 画像の面積
     img_area = img_width * img_height
 
-    # 大きさが画像の10%未満の輪郭は除く。
+    # 面積が画像全体の10%以上の輪郭のリスト。
     contours = [ c for c in contours if 0.10 < math.sqrt(cv2.contourArea(c) / img_area) ]
     if len(contours) == 0:
         # 輪郭がない場合
 
-        return [ 'side len', None, None]
+        return [ '面積が画像全体の10%以上の輪郭がない。', None, None]
 
-    # 外接矩形の辺の長さが画像の辺の長さの90%以上の輪郭は除く。
+    # 外接矩形が画像の周辺部にない輪郭のリスト。
     contours = [ c for c in contours if bounding_rect(img_width, img_height, c) ]
 
     if len(contours) == 0:
         # 輪郭がない場合
 
-        return [ 'area check', None, None]
+        return [ '輪郭が画像の周辺部にある。', None, None]
 
     # 画像の中心
     cx = img_width  / 2

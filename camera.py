@@ -183,13 +183,15 @@ if __name__ == '__main__':
     # カメラの名前のリスト = [ 'カメラ 1', 'カメラ 2', 'カメラ 3', ・・・  ]
     camera_name_list = [ f'カメラ {i+1}' for i in range(num_cameras) ]
 
+    dsp_size = 360
+
     layout = [
         [
             sg.Column([
                 [ 
                     sg.Frame('原画',[
                         [
-                            sg.Image(filename='', size=(256,256), key='-image1-')
+                            sg.Image(filename='', size=(dsp_size,dsp_size), key='-image1-')
                         ]
                     ])
                 ]
@@ -197,7 +199,7 @@ if __name__ == '__main__':
                 [ 
                     sg.Frame('物体',[
                         [
-                            sg.Image(filename='', size=(256,256), key='-image3-')
+                            sg.Image(filename='', size=(dsp_size,dsp_size), key='-image3-')
                         ]
                     ])
                 ]
@@ -207,7 +209,7 @@ if __name__ == '__main__':
                 [ 
                     sg.Frame('二値画像',[
                         [
-                            sg.Image(filename='', size=(256,256), key='-image2-')
+                            sg.Image(filename='', size=(dsp_size,dsp_size), key='-image2-')
                         ]
                     ])
                 ]
@@ -247,6 +249,7 @@ if __name__ == '__main__':
         ]
     ]
 
+    # メインウィンドウ
     window = sg.Window('カメラ', layout, font='Any 20')
 
     while True:

@@ -12,28 +12,41 @@ from odtk import _corners2rotatedbbox, ODTK
 from util import getContour
 
 cap = None
-
-playing = False
-network = None
-
-hue_shift = 10
-saturation_shift = 15
-value_shift = 15
-
-classIdx = 0
-
-S_mag =  100
-V_mag =  100
-
+"""動画ファイルのキャプチャ オブジェクト"""
 
 class ImageClass:
     """画像のクラス(カテゴリー)
     """
     def __init__(self, name, class_dir):
         self.name = name
-        self.classDir = class_dir
-        self.videoPathes = []
+        """クラスの名前"""
 
+        self.classDir = class_dir
+        """動画ファイルのフォルダのパス"""
+
+        self.videoPathes = []
+        """動画ファイルのパスのリスト"""
+
+    def get_total_frame_count(self) -> int:
+        """クラスに属する動画ファイルの全フレーム数を返す。
+
+        Returns: 全フレーム数
+        """
+        cnt = 0
+
+        # すべての動画ファイルに対して
+        for video_path in self.videoPathes:
+
+            # 動画ファイルのキャプチャ オブジェクト
+            cap = get_video_capture(video_path)    
+
+            # 動画ファイルのフレーム数
+            n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            cnt += n
+
+            cap.release()
+
+        return cnt
 
 def augment_color(img, hsv_shift):
     """画像の色を変化させてデータ拡張をする。
@@ -48,6 +61,7 @@ def augment_color(img, hsv_shift):
     # BGRからHSVに変える。
     hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) 
 
+    # 色相、彩度、明度の変化量
     hue_shift, saturation_shift, value_shift = hsv_shift
 
     # HSVの各チャネルに対し
@@ -248,7 +262,7 @@ def make_train_data(frame, bg_img, img_size, v_min, hsv_shift):
     # 二値画像
     bin_img = 255 - cv2.inRange(gray_img, v_min, 255)
 
-    # 二値化画像から輪郭とマスク画像を得る。
+    # 二値画像から輪郭とマスク画像を得る。
     msg, contour, mask_img = getContour(bin_img)
     if msg != '' or bg_img is None:
         return [bin_img] + [None] * 6
@@ -262,11 +276,13 @@ def make_train_data(frame, bg_img, img_size, v_min, hsv_shift):
     # 外接矩形の頂点
     box = cv2.boxPoints(rect)
 
+    # 画像を回転・拡大/縮小・平行移動してデータ拡張をする。
     aug_img2, mask_img2, M  = augment_shape(aug_img, mask_img, contour, img_size)
 
     # 背景画像を指定したサイズにする。
     bg_img = resize_bg_img(bg_img, img_size)             
 
+    # マスク画像を使って、画像を背景画像に貼り付ける。
     compo_img = blend_image(bg_img, aug_img2, mask_img2)
 
     # 頂点に変換行列をかける。
@@ -289,34 +305,53 @@ def make_train_data(frame, bg_img, img_size, v_min, hsv_shift):
 
     return bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box
 
-def make_image_classes(video_dir):
+def make_image_classes(video_dir : str):
+    """画像のクラスのリストを作る。
+
+    Args:
+        video_dir : 動画ファイルのフォルダのパス
+
+    Returns: 画像のクラスのリスト
+    """
+    # 画像のクラスのリスト
     image_classes = []
 
+    # すべてのクラスのフォルダに対して
     for class_dir in glob.glob(f'{video_dir}/*'):
+
+        # クラス名(カテゴリ名)
         category_name = os.path.basename(class_dir)
 
+        # 画像のクラス
         img_class = ImageClass(category_name, class_dir)
+
+        # 画像のクラスのリストに追加する。
         image_classes.append(img_class)
 
         # クラスのフォルダ内の動画ファイルに対し
         for video_path in glob.glob(f'{class_dir}/*'):
 
+            # パスの区切り文字をUNIX形式に統一する。
             video_path_str = str(video_path).replace('\\', '/')
 
+            # 動画ファイルのパスのリストに追加する。
             img_class.videoPathes.append(video_path_str)
 
     return image_classes
 
 def parse():
-    parser = argparse.ArgumentParser(description='Auto Image Tag')
-    parser.add_argument('-i','--input', type=str, help='path to videos')
-    parser.add_argument('-bg', type=str, help='path to background images')
-    parser.add_argument('-o','--output', type=str, help='path to outpu')
-    parser.add_argument('-net','--network', type=str, help='odtk or yolov5', default='odtk')
-    parser.add_argument('-dtsz', '--data_size', type=int, help='data size', default=1000)
-    parser.add_argument('-imsz', '--img_size', type=int, help='image size', default=720)
-    parser.add_argument('-v', '--v_min', type=int, help='Value min', default=130)
-    parser.add_argument('-hsv', '--hsv_shift', type=int, nargs=3, help='color shift', default=(10,15,15))
+    """コマンドライン引数を解析する。
+
+    Returns: 引数のリスト
+    """
+    parser = argparse.ArgumentParser(description='動画ファイルから学習データを作る。')
+    parser.add_argument('-i','--input', type=str, help='動画ファイルのフォルダのパス')
+    parser.add_argument('-bg', type=str, help='背景画像ファイルのフォルダのパス')
+    parser.add_argument('-o','--output', type=str, help='学習データの出力先のパス')
+    parser.add_argument('-dtsz', '--data_size', type=int, help='1クラスあたりの学習データ数', default=1000)
+    parser.add_argument('-imsz', '--img_size', type=int, help='出力画像のサイズ', default=720)
+    parser.add_argument('-v', '--v_min', type=int, help='明度の閾値', default=130)
+    parser.add_argument('-hsv', '--hsv_shift', type=int, nargs=3, help='HSVの変化量', default=(10,15,15))
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -329,56 +364,59 @@ def parse():
     # 出力先フォルダのパス
     output_dir = args.output.replace('\\', '/')
 
-    network_name = args.network.lower()
+    return video_dir, bg_img_dir, output_dir, args.data_size, args.img_size, args.v_min, args.hsv_shift
 
-    return video_dir, bg_img_dir, output_dir, network_name, args.data_size, args.img_size, args.v_min, args.hsv_shift
+def get_video_capture(video_path : str):
+    """動画ファイルのキャプチャ オブジェクトを返す。
 
-def get_video_capture(video_path):
+    Args:
+        video_path : 動画ファイルのパス
+
+    Returns: キャプチャ オブジェクト
+    """
     global cap
 
     if cap is not None:
+
+        # キャプチャ オブジェクトを解放する。
         cap.release()
 
+    # 動画ファイルのキャプチャ オブジェクト
     cap = cv2.VideoCapture(video_path)    
 
-    return cap
-
-def init_cap(image_class, video_idx):
-    video_path = image_class.videoPathes[video_idx]
-
-    # 動画のキャプチャー オブジェクト
-    cap = get_video_capture(video_path)    
-
     if not cap.isOpened():
+        # 動画を再生できない場合
+
         print("動画再生エラー")
         sys.exit()
 
     return cap
 
-def get_total_frame_count(image_class):
-    cnt = 0
-    for video_path in image_class.videoPathes:
+def init_cap(image_class : ImageClass, video_idx : int):
+    """動画のキャプチャー オブジェクトを作る。
 
-        cap = get_video_capture(video_path)    
+    Args:
+        image_class : 画像のクラス
+        video_idx : 動画ファイルのインデックス
 
-        if not cap.isOpened():
-            print("動画再生エラー")
-            sys.exit()
+    Returns: キャプチャー オブジェクト
+    """
+    video_path = image_class.videoPathes[video_idx]
 
-        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cnt += n
+    # 動画のキャプチャー オブジェクト
+    cap = get_video_capture(video_path)    
 
-        cap.release()
+    return cap
 
-    return cnt
-
-def make_training_data(image_classes, bg_img_paths, network, data_size, img_size, v_min, hsv_shift):
+def make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_size, v_min, hsv_shift):
+    # ODTKの学習データ作成のオブジェクト
+    network = ODTK(output_dir, image_classes)
 
     # 背景画像ファイルのインデックス
     bg_img_idx = 0
 
     for class_idx, image_class in enumerate(image_classes):
-        total_frame_cnt = get_total_frame_count(image_class)
+        total_frame_cnt = image_class.get_total_frame_count()
 
         class_data_cnt = 0
 
@@ -422,29 +460,23 @@ def make_training_data(image_classes, bg_img_paths, network, data_size, img_size
     network.save()
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, network_name, data_size, img_size, v_min, hsv_shift = parse()
-    hue_shift, saturation_shift, value_shift = hsv_shift
+    video_dir, bg_img_dir, output_dir, data_size, img_size, v_min, hsv_shift = parse()
 
-    # OpenCVのビルド情報を表示する。
-    # print(cv2.getBuildInformation())
+    # 色相、彩度、明度の変化量
+    hue_shift, saturation_shift, value_shift = hsv_shift
 
     # 出力先フォルダを作る。
     os.makedirs(output_dir, exist_ok=True)
 
-    # 背景画像ファイルのパス
+    # 背景画像ファイルのパスのリスト
     bg_img_paths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
 
+    # 画像のクラスのリスト
     image_classes = make_image_classes(video_dir)
 
-    if network_name == 'odtk':
-        network = ODTK(output_dir, image_classes)
-    elif network_name == 'yolov5':
-        network = YOLOv5(output_dir, image_classes)
-
-    else:
-        assert(False)
-
+    # 色相、彩度、明度の変化量
     hsv_shift = (hue_shift, saturation_shift, value_shift)
-    iterator = make_training_data(image_classes, bg_img_paths, network, data_size, img_size, v_min, hsv_shift)
+
+    iterator = make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_size, v_min, hsv_shift)
     for _ in tqdm(iterator, total=len(image_classes) * data_size):
         pass

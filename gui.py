@@ -10,14 +10,13 @@ from main import parse
 from main import make_train_data, make_image_classes, make_training_data, get_video_capture
 
 iterator = None
-network = None
 cap = None
 playing = False
 show_rect = True
 use_same_bg_img = False
 
-# 明度の閾値(最小値)
 v_min = 130
+"""明度の閾値(最小値)"""
 
 hue_shift = 10
 saturation_shift = 15
@@ -27,7 +26,18 @@ value_shift = 15
 class_idx = 0
 video_Idx = 0
 
-def spin(label, key, val, min_val, max_val):
+def spin(label : str, key : str, val : int, min_val : int, max_val : int):
+    """TextとSpinのペアを作る。
+
+    Args:
+        label : Textのラベル
+        key : Spinのキー
+        val : Spinの初期値
+        min_val : 最小値
+        max_val : 最大値
+
+    Returns: TextとSpinのペア
+    """
     return [ 
         sg.Text(label, size=(12,1)),
         sg.Spin(list(range(min_val, max_val + 1)), initial_value=val, size=(5, 1), key=key, enable_events=True )
@@ -59,8 +69,13 @@ def init_capture(class_idx, video_Idx):
         print("動画再生エラー")
         sys.exit()
 
+    # 動画ファイルのフレーム数
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # 再生位置のスライダーの値の範囲を更新する。
     window['-img-pos-'].update(range=(0, frame_count - 1))
+
+    # 再生位置のスライダーの現在位置を更新する。
     window['-img-pos-'].update(value=0)
 
     playing = setPlaying(window, True)
@@ -101,7 +116,9 @@ def show_videos(class_idx, video_Idx):
 
                 prev_bg_img = bg_img
 
+                # 色相、彩度、明度の変化量
                 hsv_shift = (hue_shift, saturation_shift, value_shift)
+
                 bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, v_min, hsv_shift)
                 if mask_img is None:
 
@@ -111,13 +128,14 @@ def show_videos(class_idx, video_Idx):
                     yield
                     continue
 
-                # 元画像にマスクをかける。
+                # 原画をマスクでクリップする。
                 mask3_img = np.broadcast_to(mask_img[:, :, np.newaxis], aug_img.shape)
                 clip_img = np.where(mask3_img == 0, mask3_img, aug_img)
 
                 compo_img  = compo_img.copy()
 
                 if show_rect:
+                    # 矩形を表示する場合
 
                     # 外接矩形を描く。
                     cv2.drawContours(clip_img, [ np.int0(box) ], 0, (0,255,0), 2)
@@ -136,9 +154,18 @@ def show_videos(class_idx, video_Idx):
                     # バウンディングボックスの左上の頂点の位置に円を描く。
                     cv2.circle(compo_img, (int(x), int(y)), 10, (255,255,255), -1)
 
-                for img, key in zip( [frame, bin_img, clip_img, compo_img],
-                                     [ '-image11-', '-image12-', '-image21-', '-image22-' ]):
-                    show_image(window[key], img)
+
+                # 原画を表示する。
+                show_image(window['-image11-'], frame)
+
+                # 二値画像を表示する。
+                show_image(window['-image12-'], bin_img)
+
+                # 原画をマスクでクリップした画像を表示する。
+                show_image(window['-image21-'], clip_img)
+
+                # 合成画像を表示する。
+                show_image(window['-image22-'], compo_img)
 
                 yield
                 continue
@@ -162,15 +189,23 @@ def show_videos(class_idx, video_Idx):
 
 
 def get_tree_data():
+    """TreeDataを作り、クラスと動画ファイルのノードを挿入する。
+
+    Returns: TreeData
+    """
     treedata = sg.TreeData()
 
     # すべてのクラスに対し
     for img_class in image_classes:
+
+        # TreeDataにクラスのノードを挿入する。
         treedata.Insert('', img_class.name, img_class.name, values=[])
 
         # クラスの動画に対し
         for video_path in img_class.videoPathes:
             video_name = os.path.basename(video_path)
+
+            # TreeDataに動画ファイルのノードを挿入する。
             treedata.Insert(img_class.name, video_path, video_name, values=[video_path])
 
     return treedata
@@ -184,9 +219,15 @@ def update_one_frame(event : str):
     global iterator, use_same_bg_img
 
     if cap is not None:
+        # 再生中の場合
+
+        # 再生位置 = Sliderの値 - 1
         pos = max(0, int(values['-img-pos-']) - 1)
+
+        # 再生位置をセットする。
         cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
 
+        # Sliderのイベントでなければ、同じ背景画像を使う。
         use_same_bg_img = (event != '-img-pos-')
 
         if not playing and iterator is not None:
@@ -200,7 +241,9 @@ def update_one_frame(event : str):
 
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, network_name, data_size, img_size, v_min, hsv_shift = parse()
+    video_dir, bg_img_dir, output_dir, data_size, img_size, v_min, hsv_shift = parse()
+
+    # 色相、彩度、明度の変化量
     hue_shift, saturation_shift, value_shift = hsv_shift
 
     print(cv2.getBuildInformation())
@@ -211,6 +254,7 @@ if __name__ == '__main__':
     # 背景画像ファイルのパス
     bg_img_paths = [ x for x in glob.glob(f'{bg_img_dir}/*') if os.path.splitext(x)[1] in [ '.jpg', '.png' ] ]
 
+    # 画像のクラスのリスト
     image_classes = make_image_classes(video_dir)
     
     # ツリー表示のデータを作る。
@@ -318,7 +362,7 @@ if __name__ == '__main__':
         ]
     ]
 
-    # Create the Window
+    # メインウィンドウ
     window = sg.Window('auto img tab', layout, font=font_str)
 
     cap = None
@@ -348,24 +392,48 @@ if __name__ == '__main__':
                 playing = setPlaying(window, True)
 
         elif event == '-V-min-':
-            # 明度の閾値(最小値)
+            # 明度の閾値(最小値)のスピン
+
+            # 明度の閾値
             v_min = int(values[event])
+
+            # 現在のフレームの表示を更新する。
             update_one_frame(event)
 
         elif event == '-hue-shift-':
+            # 色相の変化量のスピン
+
+            # 色相の変化量
             hue_shift = int(values[event])
+
+            # 現在のフレームの表示を更新する。
             update_one_frame(event)
 
         elif event == '-saturation-shift-':
+            # 彩度の変化量のスピン
+
+            # 彩度の変化量
             saturation_shift = int(values[event])
+
+            # 現在のフレームの表示を更新する。
             update_one_frame(event)
 
         elif event == '-value-shift-':
+            # 明度の変化量のスピン
+
+            # 明度の変化量
             value_shift = int(values[event])
+
+            # 現在のフレームの表示を更新する。
             update_one_frame(event)
 
         elif event == '-show-rect-':
+            # 矩形の表示/非表示のチェックボックス
+
+            # 矩形の表示/非表示
             show_rect = values[event]
+
+            # 現在のフレームの表示を更新する。
             update_one_frame(event)
 
         elif event == '__TIMEOUT__':
@@ -377,9 +445,13 @@ if __name__ == '__main__':
                     iterator = None
 
         elif event == '-img-pos-':
+
+            # 現在のフレームの表示を更新する。
             update_one_frame(event)
 
         elif event == '-play/pause-':
+            # 再生/休止ボタン
+
             playing = setPlaying(window, not playing)
 
             if playing and iterator is None:
@@ -388,26 +460,24 @@ if __name__ == '__main__':
         elif event == '-save-all-':
             data_size = int(values['-data-size-'])
 
-            network = ODTK(output_dir, image_classes)
-
+            # 色相、彩度、明度の変化量
             hsv_shift = (hue_shift, saturation_shift, value_shift)
-            iterator = make_training_data(image_classes, bg_img_paths, network, data_size, img_size, v_min, hsv_shift)
 
+            # 全クラスの学習データ数
             total_data_size = data_size * len(image_classes)
-            for idx, ret in enumerate(iterator):
-                if not sg.one_line_progress_meter('make training network', idx+1, total_data_size, orientation='h'):
+
+            for idx, ret in enumerate( make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_size, v_min, hsv_shift) ):
+                if not sg.one_line_progress_meter('学習データ作成', idx+1, total_data_size, orientation='h'):
+                    # Cancelボタンがクリックされた場合
 
                     break
 
                 if idx == total_data_size - 1:
-                    network.save()
-                    sg.popup_ok('training data is created.')
+                    # 最後のデータの場合
+                    
+                    sg.popup_ok('学習データが作成されました。')
                     break
             
-            iterator = None
-
-
-
         else:
 
             print('You entered ', event)
