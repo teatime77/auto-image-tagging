@@ -138,7 +138,7 @@ def show_videos(class_idx, video_Idx):
                     # 矩形を表示する場合
 
                     # 外接矩形を描く。
-                    cv2.drawContours(clip_img, [ np.int0(box) ], 0, (0,255,0), 2)
+                    cv2.drawContours(clip_img, [ np.int0(box) ], 0, (255,0,0), 3)
 
                     x, y, w, h, theta = bounding_box
 
@@ -146,13 +146,13 @@ def show_videos(class_idx, video_Idx):
 
 
                     # 座標変換後の外接矩形を描く。
-                    cv2.drawContours(compo_img, [ np.int0(corners2)  ], 0, (0,255,0), 2)
+                    cv2.drawContours(compo_img, [ np.int0(corners2)  ], 0, (255,0,0), 3)
 
                     # バウンディングボックスを描く。
                     cv2.rectangle(compo_img, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
 
                     # バウンディングボックスの左上の頂点の位置に円を描く。
-                    cv2.circle(compo_img, (int(x), int(y)), 10, (255,255,255), -1)
+                    cv2.circle(compo_img, (int(x), int(y)), 5, (255,255,255), -1)
 
 
                 # 原画を表示する。
