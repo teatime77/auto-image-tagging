@@ -18,11 +18,6 @@ use_same_bg_img = False
 v_min = 130
 """明度の閾値(最小値)"""
 
-hue_shift = 10
-saturation_shift = 15
-value_shift = 15
-
-
 class_idx = 0
 video_Idx = 0
 
@@ -116,10 +111,7 @@ def show_videos(class_idx, video_Idx):
 
                 prev_bg_img = bg_img
 
-                # 色相、彩度、明度の変化量
-                hsv_shift = (hue_shift, saturation_shift, value_shift)
-
-                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, v_min, hsv_shift)
+                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, v_min)
                 if mask_img is None:
 
                     black_img = np.zeros(frame.shape, dtype=np.uint8)
@@ -241,10 +233,7 @@ def update_one_frame(event : str):
 
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, data_size, img_size, v_min, hsv_shift = parse()
-
-    # 色相、彩度、明度の変化量
-    hue_shift, saturation_shift, value_shift = hsv_shift
+    video_dir, bg_img_dir, output_dir, data_size, img_size, v_min = parse()
 
     print(cv2.getBuildInformation())
 
@@ -280,14 +269,6 @@ if __name__ == '__main__':
                 [  
                     sg.Frame('二値化', [
                         spin('明度の閾値', '-V-min-', v_min, 0, 255)
-                    ],  expand_x=True, pad=((0,0),(10,10)) )
-                ]
-                ,
-                [  
-                    sg.Frame('データ拡張', [
-                        spin('色相', '-hue-shift-', hue_shift, 0, 30),
-                        spin('彩度', '-saturation-shift-', saturation_shift, 0, 50),
-                        spin('明度', '-value-shift-', value_shift, 0, 50)
                     ],  expand_x=True, pad=((0,0),(10,10)) )
                 ]
                 ,
@@ -400,33 +381,6 @@ if __name__ == '__main__':
             # 現在のフレームの表示を更新する。
             update_one_frame(event)
 
-        elif event == '-hue-shift-':
-            # 色相の変化量のスピン
-
-            # 色相の変化量
-            hue_shift = int(values[event])
-
-            # 現在のフレームの表示を更新する。
-            update_one_frame(event)
-
-        elif event == '-saturation-shift-':
-            # 彩度の変化量のスピン
-
-            # 彩度の変化量
-            saturation_shift = int(values[event])
-
-            # 現在のフレームの表示を更新する。
-            update_one_frame(event)
-
-        elif event == '-value-shift-':
-            # 明度の変化量のスピン
-
-            # 明度の変化量
-            value_shift = int(values[event])
-
-            # 現在のフレームの表示を更新する。
-            update_one_frame(event)
-
         elif event == '-show-rect-':
             # 矩形の表示/非表示のチェックボックス
 
@@ -460,13 +414,10 @@ if __name__ == '__main__':
         elif event == '-save-all-':
             data_size = int(values['-data-size-'])
 
-            # 色相、彩度、明度の変化量
-            hsv_shift = (hue_shift, saturation_shift, value_shift)
-
             # 全クラスの学習データ数
             total_data_size = data_size * len(image_classes)
 
-            for idx, ret in enumerate( make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_size, v_min, hsv_shift) ):
+            for idx, ret in enumerate( make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_size, v_min) ):
                 if not sg.one_line_progress_meter('学習データ作成', idx+1, total_data_size, orientation='h'):
                     # Cancelボタンがクリックされた場合
 

@@ -1,7 +1,6 @@
 import os
 import sys
 import datetime
-import argparse
 import cv2
 import numpy as np
 import PySimpleGUI as sg

@@ -8,11 +8,19 @@ import cv2
 from PIL import Image, ImageFilter
 import numpy as np
 from tqdm import tqdm
+import albumentations as A
 from odtk import _corners2rotatedbbox, ODTK
 from util import getContour
 
 cap = None
 """動画ファイルのキャプチャ オブジェクト"""
+
+transform = A.Compose([
+    A.CLAHE(),
+    A.Blur(),
+    A.HueSaturationValue()
+])
+
 
 class ImageClass:
     """画像のクラス(カテゴリー)
@@ -48,56 +56,7 @@ class ImageClass:
 
         return cnt
 
-def augment_color(img, hsv_shift):
-    """画像の色を変化させてデータ拡張をする。
 
-    Args:
-        img : 入力画像
-        hsv_shift : HSVの変化量
-
-    Returns:
-        データ拡張をした画像
-    """
-    # BGRからHSVに変える。
-    hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) 
-
-    # 色相、彩度、明度の変化量
-    hue_shift, saturation_shift, value_shift = hsv_shift
-
-    # HSVの各チャネルに対し
-    for channel, shift in enumerate([hue_shift, saturation_shift, value_shift]):
-        if shift == 0:
-            continue
-
-        # 変化量を乱数で決める。
-        change = np.random.randint(-shift, shift)
-
-        # 指定したチャネルのデータ
-        data = hsv_img[:, :, channel]
-
-        if channel == 0:
-            # 色相の場合
-
-            # int32型に変換する。
-            data = data.astype(np.int32)
-
-            # 変化後の色相が0～180の範囲に入るように色相をずらす。
-            data = (data + change + 180) % 180
-
-        else:
-            # 彩度や明度の場合
-
-            # float32型に変換する。
-            data  = data.astype(np.float32)
-
-            # 変化量は百分率(%)として作用させる。
-            data  = (data * ((100 + change) / 100.0) ).clip(0, 255)
-
-        # 変化させた値をチャネルにセットする。
-        hsv_img[:, :, channel] = data.astype(np.uint8)
-
-    # HSVからBGRに変える。
-    return cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
 
 def augment_shape(aug_img : np.ndarray, mask_img : np.ndarray, contour : np.ndarray, img_size : int) -> np.ndarray:
     """画像を回転・拡大/縮小・平行移動してデータ拡張をする。
@@ -255,7 +214,8 @@ def resize_bg_img(bg_img : np.ndarray, img_size : int) -> np.ndarray:
 
     return bg_img
 
-def make_train_data(frame, bg_img, img_size, v_min, hsv_shift):
+def make_train_data(frame, bg_img, img_size, v_min):
+
     # グレー画像
     gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
 
@@ -268,7 +228,7 @@ def make_train_data(frame, bg_img, img_size, v_min, hsv_shift):
         return [bin_img] + [None] * 6
 
     # 画像の色を変化させてデータ拡張をする。
-    aug_img = augment_color(frame, hsv_shift)
+    aug_img = transform(image=frame)['image']
 
     # 回転を考慮した外接矩形を得る。
     rect = cv2.minAreaRect(contour)
@@ -351,7 +311,6 @@ def parse():
     parser.add_argument('-dtsz', '--data_size', type=int, help='1クラスあたりの学習データ数', default=1000)
     parser.add_argument('-imsz', '--img_size', type=int, help='出力画像のサイズ', default=720)
     parser.add_argument('-v', '--v_min', type=int, help='明度の閾値', default=130)
-    parser.add_argument('-hsv', '--hsv_shift', type=int, nargs=3, help='HSVの変化量', default=(10,15,15))
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -364,7 +323,7 @@ def parse():
     # 出力先フォルダのパス
     output_dir = args.output.replace('\\', '/')
 
-    return video_dir, bg_img_dir, output_dir, args.data_size, args.img_size, args.v_min, args.hsv_shift
+    return video_dir, bg_img_dir, output_dir, args.data_size, args.img_size, args.v_min
 
 def get_video_capture(video_path : str):
     """動画ファイルのキャプチャ オブジェクトを返す。
@@ -408,7 +367,7 @@ def init_cap(image_class : ImageClass, video_idx : int):
 
     return cap
 
-def make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_size, v_min, hsv_shift):
+def make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_size, v_min):
     # ODTKの学習データ作成のオブジェクト
     network = ODTK(output_dir, image_classes)
 
@@ -438,7 +397,7 @@ def make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_s
                 bg_img = cv2.imread(bg_img_paths[bg_img_idx])
                 bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
 
-                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, v_min, hsv_shift)
+                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, v_min)
 
                 if mask_img is not None:
                     network.add_image(class_idx, video_idx, pos, compo_img, corners2, bounding_box)
@@ -460,10 +419,7 @@ def make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_s
     network.save()
 
 if __name__ == '__main__':
-    video_dir, bg_img_dir, output_dir, data_size, img_size, v_min, hsv_shift = parse()
-
-    # 色相、彩度、明度の変化量
-    hue_shift, saturation_shift, value_shift = hsv_shift
+    video_dir, bg_img_dir, output_dir, data_size, img_size, v_min = parse()
 
     # 出力先フォルダを作る。
     os.makedirs(output_dir, exist_ok=True)
@@ -474,9 +430,6 @@ if __name__ == '__main__':
     # 画像のクラスのリスト
     image_classes = make_image_classes(video_dir)
 
-    # 色相、彩度、明度の変化量
-    hsv_shift = (hue_shift, saturation_shift, value_shift)
-
-    iterator = make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_size, v_min, hsv_shift)
+    iterator = make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_size, v_min)
     for _ in tqdm(iterator, total=len(image_classes) * data_size):
         pass
