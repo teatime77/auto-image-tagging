@@ -165,6 +165,8 @@ def read_one_frame():
 
 if __name__ == '__main__':
 
+    print(cv2.getBuildInformation())
+
     # 動画/静止画を保存するフォルダを作る。
     os.makedirs('./capture', exist_ok=True)
 

@@ -308,9 +308,9 @@ def parse():
     parser.add_argument('-i','--input', type=str, help='動画ファイルのフォルダのパス')
     parser.add_argument('-bg', type=str, help='背景画像ファイルのフォルダのパス')
     parser.add_argument('-o','--output', type=str, help='学習データの出力先のパス')
-    parser.add_argument('-dtsz', '--data_size', type=int, help='1クラスあたりの学習データ数', default=1000)
-    parser.add_argument('-imsz', '--img_size', type=int, help='出力画像のサイズ', default=720)
-    parser.add_argument('-v', '--v_min', type=int, help='明度の閾値', default=130)
+    parser.add_argument('-dtsz', '--data_size', type=int, help='1クラスあたりの学習データの数。デフォルトは1000。', default=1000)
+    parser.add_argument('-imsz', '--img_size', type=int, help='出力画像のサイズ。 デフォルトは720。', default=720)
+    parser.add_argument('-v', '--v_min', type=int, help='明度の閾値。デフォルトは250。', default=250)
 
     args = parser.parse_args(sys.argv[1:])
 
