@@ -260,7 +260,7 @@ def make_train_data(frame, bg_img, img_size, v_min):
 
     x, y, w, h, theta = bounding_box
     if not (0 <= x and x + w <= img_size and 0 <= y and y + h <= img_size):
-        print(f'x:{x} x+w:{x+w} y:{y} y+h:{y+h} img-size:{img_size}')
+        # print(f'x:{x} x+w:{x+w} y:{y} y+h:{y+h} img-size:{img_size}')
         return [bin_img] + [None] * 6
 
     return bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box

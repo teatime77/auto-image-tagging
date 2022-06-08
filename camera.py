@@ -26,6 +26,9 @@ standard_resolutions = [
 ]
 """代表的な解像度のリスト"""
 
+make_square = False
+# 画像を正方形にする
+
 def get_num_cameras():
     """パソコンに接続されたカメラの数を返す。
 
@@ -52,7 +55,7 @@ def init_camera(camera_idx):
     Args:
         camera_idx : カメラのインデックス (0オリジン)
     """
-    global cap, brightness, frame_width, frame_height, frame_rate
+    global cap, brightness, frame_width, frame_height, img_size, frame_rate
 
     sg.popup_quick_message('カメラの初期処理をしています．．．', font='Any 20', background_color='blue')
 
@@ -81,6 +84,8 @@ def init_camera(camera_idx):
     frame_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+    img_size = min(frame_width, frame_height)
+
     # フレームレート
     frame_rate = cap.get(cv2.CAP_PROP_FPS)
 
@@ -98,7 +103,10 @@ def initWriter():
     video_format = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
 
     # 動画ファイルへのライター
-    writer = cv2.VideoWriter(write_path, video_format, frame_rate, (frame_width, frame_height))
+    if make_square:
+        writer = cv2.VideoWriter(write_path, video_format, frame_rate, (img_size, img_size))
+    else:
+        writer = cv2.VideoWriter(write_path, video_format, frame_rate, (frame_width, frame_height))
 
     # 動画ファイルへの書き込み件数
     write_cnt = 0
@@ -114,6 +122,11 @@ def read_one_frame():
         # 読み込めなかった場合
 
         return
+
+    if make_square:
+        x = (frame_width  - img_size) // 2
+        y = (frame_height - img_size) // 2
+        frame = frame[y:(y+img_size), x:(x+img_size), :]
 
     # 原画を表示する。
     show_image(window['-image1-'], frame)
@@ -198,24 +211,6 @@ if __name__ == '__main__':
                 ]
                 ,
                 [ 
-                    sg.Frame('物体',[
-                        [
-                            sg.Image(filename='', size=(dsp_size,dsp_size), key='-image3-')
-                        ]
-                    ])
-                ]
-            ])
-            ,
-            sg.Column([
-                [ 
-                    sg.Frame('二値画像',[
-                        [
-                            sg.Image(filename='', size=(dsp_size,dsp_size), key='-image2-')
-                        ]
-                    ])
-                ]
-                ,
-                [ 
                     sg.Text('カメラ', size=(12,1), pad=((10,0),(20,20)) ), 
                     sg.Combo(camera_name_list, default_value=camera_name_list[0], size=(8,1), enable_events=True, readonly=True, key='-camera-')
                 ]
@@ -228,6 +223,10 @@ if __name__ == '__main__':
                 [ 
                     sg.Text('画像の明るさ', size=(12,1), pad=((10,0),(20,20)) ), 
                     sg.Spin(list(range(-1, 255 + 1)), initial_value=0, size=(8, 1), key='-brightness-', enable_events=True )
+                ]
+                ,
+                [
+                    sg.Checkbox('画像を正方形にする。', key='-square-', enable_events=True)
                 ]
                 ,
                 [ 
@@ -243,6 +242,24 @@ if __name__ == '__main__':
                     sg.Button('閉じる', key='-close-')
                 ]
             ], vertical_alignment='top', expand_y=True)
+            ,
+            sg.Column([
+                [ 
+                    sg.Frame('二値画像',[
+                        [
+                            sg.Image(filename='', size=(dsp_size,dsp_size), key='-image2-')
+                        ]
+                    ])
+                ]
+                ,
+                [ 
+                    sg.Frame('物体',[
+                        [
+                            sg.Image(filename='', size=(dsp_size,dsp_size), key='-image3-')
+                        ]
+                    ])
+                ]
+            ])
         ]
         ,
         [
@@ -288,6 +305,8 @@ if __name__ == '__main__':
                 # ボタンのテキストを"停止"にする。
                 window['-record/pause-'].update(text='停止')
 
+                window['-square-'].update(disabled = True)
+
                 initWriter()
 
             else:
@@ -295,6 +314,8 @@ if __name__ == '__main__':
 
                 # ボタンのテキストを"動画撮影"にする。
                 window['-record/pause-'].update(text='動画撮影')
+
+                window['-square-'].update(disabled = False)
 
                 # 動画ファイルへのライターを解放する。
                 writer.release()
@@ -322,6 +343,11 @@ if __name__ == '__main__':
 
             # 画像の明るさを設定する。
             cap.set(cv2.CAP_PROP_BRIGHTNESS, brightness)
+
+        elif event == '-square-':
+            # 画像を正方形にする。
+
+            make_square = values['-square-']
 
         elif event == '-shoot-':
             # 写真撮影ボタン

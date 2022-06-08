@@ -4,7 +4,7 @@
 
 Google Colabで学習データの自動生成からYOLOv5による物体検出までできるのでお試しください。
 
-[https://colab.research.google.com/drive/1fKynYDYure3X85tpAC7IU7lIKRiqXk6O?usp=sharing](https://colab.research.google.com/drive/1fKynYDYure3X85tpAC7IU7lIKRiqXk6O?usp=sharing)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1fKynYDYure3X85tpAC7IU7lIKRiqXk6O?usp=sharing)
 
 # 目次
 
@@ -38,10 +38,10 @@ git clone https://github.com/teatime77/auto-img-tag.git
 <a id="tejun"></a>
 ## 学習データの作成の手順
 
-[1. カメラ アプリで動画ファイルを作成する。](#tejun-1)
-[2. クラス別に動画ファイルをフォルダに入れる。](#tejun-2)
-[3. 背景画像ファイルを準備する。](#tejun-3)
-[4. 学習データ作成アプリを実行する。](#tejun-4)
+1. [カメラ アプリで動画ファイルを作成する。](#tejun-1)
+2. [クラス別に動画ファイルをフォルダに入れる。](#tejun-2)
+3. [背景画像ファイルを準備する。](#tejun-3)
+4. [学習データ作成アプリを実行する。](#tejun-4)
 
 
 <a id="tejun-1"></a>
@@ -58,7 +58,9 @@ python camera.py
 
 #### 操作方法
 
-- **明度の閾値** を調節して物体の輪郭が抽出されるようにします。
+- **明度の閾値** を変えると二値画像の白の領域が変化します。
+物体が背景から分離されるように調整します。
+
 <br/>
 
 + **動画撮影** ボタンをクリックすると録画が始まり、 **停止** ボタンで録画を終了します。
@@ -101,16 +103,19 @@ main.pyを実行します。
 python main.py -i 動画ファイルのフォルダ -bg 背景画像のフォルダ -o 出力先のフォルダ
 ```
 
-実行すると出力先のフォルダに **train.json** と **img** フォルダができ、imgフォルダの下に学習用の画像ファイルが作成されます。
+実行すると出力先のフォルダに **train.json** と **img** フォルダができます。
 
+<pre>
 ┳ train.json
 ┗ img
-&nbsp;&nbsp; ┣ 画像ファイル
-&nbsp;&nbsp; **⋮**
-&nbsp;&nbsp; ┗ 画像ファイル
+    ┣ 画像ファイル
+    ⋮
+    ┗ 画像ファイル
+</pre>
 
 train.jsonはCOCO形式でアノテーションの情報が書かれています。
-
+imgフォルダの下に学習用の画像ファイルが作成されます。
+<br/>
 
 #### main.pyのコマンドライン引数の一覧
 <dl>
@@ -135,10 +140,10 @@ train.jsonはCOCO形式でアノテーションの情報が書かれています
 
 ![foler](https://uroa.jp/auto-img-tag/img/gui.png)
 
-このアプリはデータ拡張などのデバッグに使っています。
+GUIアプリはデータ拡張などのデバッグに使っています。
 
 起動の引数はmain.pyと同じです。
 
 ```bash
-python gui.py -i 動画ファイルのフォルダ -bg 背景画像のフォルダ -o 出力
+python gui.py -i 動画ファイルのフォルダ -bg 背景画像のフォルダ -o 出力先のフォルダ
 ```
