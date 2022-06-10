@@ -36,7 +36,7 @@ class ODTK:
     def images_cnt(self):
         return len(self.AnnoObj["images"])
 
-    def add_image(self, class_idx, video_idx, pos, compo_img, corners2, bounding_box):
+    def add_image(self, class_idx, video_idx, pos, compo_img, box_infos):
         height, width = compo_img.shape[:2]
 
         image_id = len(self.AnnoObj["images"]) + 1
@@ -53,16 +53,17 @@ class ODTK:
             "file_name" : file_name            
         })
 
-        anno_id = len(self.AnnoObj["annotations"]) + 1
-        self.AnnoObj["annotations"].append({
-            "id" : anno_id,
-            "image_id" : image_id, 
-            "category_id" : class_idx,
-            "bbox" : bounding_box ,
-            "segmentation" : corners2,
-            "area": bounding_box[2] * bounding_box[3],           # w * h. Required for validation scores
-            "iscrowd": 0            # Required for validation scores            
-        })
+        for box, corners2, bounding_box in box_infos:
+            anno_id = len(self.AnnoObj["annotations"]) + 1
+            self.AnnoObj["annotations"].append({
+                "id" : anno_id,
+                "image_id" : image_id, 
+                "category_id" : class_idx,
+                "bbox" : bounding_box ,
+                "segmentation" : corners2,
+                "area": bounding_box[2] * bounding_box[3],           # w * h. Required for validation scores
+                "iscrowd": 0            # Required for validation scores            
+            })
 
 
     def save(self):

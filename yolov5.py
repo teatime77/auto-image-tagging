@@ -44,6 +44,8 @@ if __name__ == '__main__':
     # 入力フォルダと出力フォルダのパスをコマンドライン引数から得る。
     input_dir, outpu_dir = parse()
 
+    datasets_dir = f'{outpu_dir}/datasets'
+
     # COCO形式のアノテーションファイルを読む。
     with open(f'{input_dir}/train.json') as f:
         obj =json.load(f)
@@ -51,17 +53,20 @@ if __name__ == '__main__':
     # クラスの名前のリスト
     class_names = [x["name"] for x in obj["categories"]]
 
+    if os.path.exists(datasets_dir):
+        shutil.rmtree(datasets_dir)
+
     # トレーニング用とバリデーション用の画像ファイルのフォルダを作る。
-    os.makedirs(f'{outpu_dir}/datasets/images/train', exist_ok=True)
-    os.makedirs(f'{outpu_dir}/datasets/images/val', exist_ok=True)
+    os.makedirs(f'{datasets_dir}/images/train', exist_ok=True)
+    os.makedirs(f'{datasets_dir}/images/val', exist_ok=True)
 
     # トレーニング用とバリデーション用のラベルファイルのフォルダを作る。
-    os.makedirs(f'{outpu_dir}/datasets/labels/train', exist_ok=True)
-    os.makedirs(f'{outpu_dir}/datasets/labels/val', exist_ok=True)
+    os.makedirs(f'{datasets_dir}/labels/train', exist_ok=True)
+    os.makedirs(f'{datasets_dir}/labels/val', exist_ok=True)
 
-    with open(f'{outpu_dir}/datasets/data.yaml', 'w') as f:
+    with open(f'{datasets_dir}/data.yaml', 'w') as f:
         # データフォルダのパス
-        f.write(f'path: {outpu_dir}/datasets\n')
+        f.write(f'path: {datasets_dir}\n')
 
         # トレーニング用の画像ファイルの相対パス
         f.write(f'train: images/train\n')
@@ -80,30 +85,24 @@ if __name__ == '__main__':
 
     # すべての画像ファイルに対して
     for idx, img_inf in enumerate( tqdm(obj['images'], total=len(obj['images'])) ):
-        # 画像id
-        img_id = img_inf['id']
-
-        # 画像idに対応するアノテーションのリスト
-        ann_list = [x for x in obj['annotations'] if x["image_id"] == img_id]
-
-        # 画像idに対応するアノテーションは1個のはず
-        assert len(ann_list) == 1
-        ann = ann_list[0]
 
         # 95%をトレーニングに使い、5%をバリデーションに使う。
         if idx < len(obj['images']) * 95 / 100:
             # トレーニングの場合
 
             # YOLOv5用の画像ファイルとラベルファイルのパス
-            images_dir = f'{outpu_dir}/datasets/images/train'
-            labels_dir = f'{outpu_dir}/datasets/labels/train'
+            images_dir = f'{datasets_dir}/images/train'
+            labels_dir = f'{datasets_dir}/labels/train'
 
         else:
             # バリデーションの場合
 
             # YOLOv5用の画像ファイルとラベルファイルのパス
-            images_dir = f'{outpu_dir}/datasets/images/val'
-            labels_dir = f'{outpu_dir}/datasets/labels/val'
+            images_dir = f'{datasets_dir}/images/val'
+            labels_dir = f'{datasets_dir}/labels/val'
+
+        # 画像id
+        img_id = img_inf['id']
 
         # コピー元の画像ファイルのパス
         src_image_path = f'{input_dir}/img/{img_inf["file_name"]}'
@@ -115,27 +114,33 @@ if __name__ == '__main__':
         image_height = float(img_inf["height"])
         image_width  = float(img_inf["width"])
 
-        # 物体の位置とサイズと回転。 回転(theta)はYOLOv5では使わない。
-        x, y, w, h, theta = ann['bbox']
-        
-        # 以下で物体の位置とサイズは画像のサイズに対する比で表す。
+        # 画像idに対応するアノテーションのリスト
+        ann_list = [x for x in obj['annotations'] if x["image_id"] == img_id]
 
-        # 物体の中心のXY座標
-        x_center = (x + 0.5 * w) / image_width
-        y_center = (y + 0.5 * h) / image_height
+        # 画像idに対応するアノテーションに対して
+        for ann in ann_list:
 
-        # 物体のサイズ
-        width    = w / image_width
-        height   = h / image_height
+            # 物体の位置とサイズと回転。 回転(theta)はYOLOv5では使わない。
+            x, y, w, h, theta = ann['bbox']
+            
+            # 以下で物体の位置とサイズは画像のサイズに対する比で表す。
 
-        # ラベルファイル名
-        label_file_name = img_inf["file_name"].replace('.jpg', '.txt')
+            # 物体の中心のXY座標
+            x_center = (x + 0.5 * w) / image_width
+            y_center = (y + 0.5 * h) / image_height
 
-        # ラベルファイルのパス
-        label_file_path = f'{labels_dir}/{label_file_name}'
+            # 物体のサイズ
+            width    = w / image_width
+            height   = h / image_height
 
-        # ラベルファイルをオープンする。
-        with open(label_file_path, 'w') as f:
+            # ラベルファイル名
+            label_file_name = img_inf["file_name"].replace('.jpg', '.txt')
 
-            # カテゴリー(クラス)のid, 物体の中心のXY座標, 物体のサイズを書く。
-            f.write(f'{ann["category_id"]} {x_center} {y_center} {width} {height}\n')
+            # ラベルファイルのパス
+            label_file_path = f'{labels_dir}/{label_file_name}'
+
+            # ラベルファイルをオープンする。
+            with open(label_file_path, 'w') as f:
+
+                # カテゴリー(クラス)のid, 物体の中心のXY座標, 物体のサイズを書く。
+                f.write(f'{ann["category_id"]} {x_center} {y_center} {width} {height}\n')

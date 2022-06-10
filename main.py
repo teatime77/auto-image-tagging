@@ -58,17 +58,15 @@ class ImageClass:
 
 
 
-def augment_shape(aug_img : np.ndarray, mask_img : np.ndarray, contour : np.ndarray, img_size : int) -> np.ndarray:
-    """画像を回転・拡大/縮小・平行移動してデータ拡張をする。
+def augment_shape(contour : np.ndarray, img_size : int) -> np.ndarray:
+    """回転・拡大/縮小・平行移動の変換行列を返す。
 
     Args:
-        aug_img : 入力画像
-        mask_img : マスク画像
         contour : 輪郭
         img_size : 貼り付け先の画像のサイズ
 
     Returns:
-        変換後の画像
+        変換行列
     """
 
     # 最小外接円の中心と半径
@@ -114,11 +112,7 @@ def augment_shape(aug_img : np.ndarray, mask_img : np.ndarray, contour : np.ndar
     m3 = np.dot(m2, m1)
     M = m3[:2,:]
 
-    # 画像に変換行列を作用させる。
-    aug_img2  = cv2.warpAffine(aug_img , M, (img_size, img_size))
-    mask_img2 = cv2.warpAffine(mask_img, M, (img_size, img_size))
-
-    return aug_img2, mask_img2, M
+    return M
 
 def blend_image(bg_img : np.ndarray, aug_img2 : np.ndarray, mask_img2 : np.ndarray) -> np.ndarray:
     """マスク画像を使って、画像を背景画像に貼り付ける。
@@ -214,6 +208,32 @@ def resize_bg_img(bg_img : np.ndarray, img_size : int) -> np.ndarray:
 
     return bg_img
 
+def intersect_bounding_box(bounding_box1 : list[float], bounding_box2 : list[float], img_size : int) -> bool:
+    """2つのバウンディングボックスが交わればTrueを返す。
+
+    Args:
+        bounding_box1 : バウンディングボックス1
+        bounding_box2 : バウンディングボックス2
+        img_size : 画像サイズ
+
+    Returns:
+        _type_: _description_
+    """
+    x1, y1, w1, h1, theta1 = bounding_box1
+
+    x2, y2, w2, h2, theta2 = bounding_box2
+
+    margin = img_size // 8
+
+    # X座標が交わるならTrue
+    x_intersect = (x1 - margin <= x2 and x2 <= x1 + w1 + margin) or (x2 - margin <= x1 and x1 <= x2 + w2 + margin)
+
+    # Y座標が交わるならTrue
+    y_intersect = (y1 - margin <= y2 and y2 <= y1 + h1 + margin) or (y2 - margin <= y1 and y1 <= y2 + h2 + margin)
+
+    return x_intersect and y_intersect
+
+
 def make_train_data(frame, bg_img, img_size, v_min):
 
     # グレー画像
@@ -225,10 +245,12 @@ def make_train_data(frame, bg_img, img_size, v_min):
     # 二値画像から輪郭とマスク画像を得る。
     msg, contour, mask_img = getContour(bin_img)
     if msg != '' or bg_img is None:
-        return [bin_img] + [None] * 6
+        return [bin_img] + [None] * 3
 
-    # 画像の色を変化させてデータ拡張をする。
-    aug_img = transform(image=frame)['image']
+    # 背景画像を指定したサイズにする。
+    bg_img = resize_bg_img(bg_img, img_size)       
+
+    compo_img = bg_img.copy()      
 
     # 回転を考慮した外接矩形を得る。
     rect = cv2.minAreaRect(contour)
@@ -236,34 +258,51 @@ def make_train_data(frame, bg_img, img_size, v_min):
     # 外接矩形の頂点
     box = cv2.boxPoints(rect)
 
-    # 画像を回転・拡大/縮小・平行移動してデータ拡張をする。
-    aug_img2, mask_img2, M  = augment_shape(aug_img, mask_img, contour, img_size)
+    box_infos = []
 
-    # 背景画像を指定したサイズにする。
-    bg_img = resize_bg_img(bg_img, img_size)             
+    for _ in range(10):
 
-    # マスク画像を使って、画像を背景画像に貼り付ける。
-    compo_img = blend_image(bg_img, aug_img2, mask_img2)
+        # 回転・拡大/縮小・平行移動の変換行列
+        M  = augment_shape(contour, img_size)
 
-    # 頂点に変換行列をかける。
-    corners2 = [ np.dot(M, np.array(p + [1])).tolist() for p in box.tolist() ]
+        # 頂点に変換行列をかける。
+        corners2 = [ np.dot(M, np.array(p + [1])).tolist() for p in box.tolist() ]
 
-    # 最初の頂点から2番目の頂点へ向かう辺の角度が±45°以下になるように、頂点の順番を変える。
-    corners2 = rotate_corners(corners2)
-    if corners2 is None:
-        print('slope is None')
-        
-        return [bin_img] + [None] * 6
+        # 最初の頂点から2番目の頂点へ向かう辺の角度が±45°以下になるように、頂点の順番を変える。
+        corners2 = rotate_corners(corners2)
+        if corners2 is None:
+            print('slope is None')
+            
+            continue
 
-    # バウンディングボックスと回転角を得る。
-    bounding_box = _corners2rotatedbbox(corners2)
+        # バウンディングボックスと回転角を得る。
+        bounding_box = _corners2rotatedbbox(corners2)
 
-    x, y, w, h, theta = bounding_box
-    if not (0 <= x and x + w <= img_size and 0 <= y and y + h <= img_size):
-        # print(f'x:{x} x+w:{x+w} y:{y} y+h:{y+h} img-size:{img_size}')
-        return [bin_img] + [None] * 6
+        x, y, w, h, theta = bounding_box
+        if not (0 <= x and x + w <= img_size and 0 <= y and y + h <= img_size):
+            # print(f'x:{x} x+w:{x+w} y:{y} y+h:{y+h} img-size:{img_size}')
+            
+            continue
 
-    return bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box
+        if any(intersect_bounding_box(bounding_box, bounding_box2, img_size) for _, _, bounding_box2 in box_infos):
+            continue
+
+        # 画像の色を変化させてデータ拡張をする。
+        aug_img = transform(image=frame)['image']
+
+        # 画像に変換行列を作用させる。
+        aug_img2  = cv2.warpAffine(aug_img , M, (img_size, img_size))
+        mask_img2 = cv2.warpAffine(mask_img, M, (img_size, img_size))
+
+        # マスク画像を使って、画像を背景画像に貼り付ける。
+        compo_img = blend_image(compo_img, aug_img2, mask_img2)
+
+        box_infos.append((box, corners2, bounding_box))
+
+        if len(box_infos) == 5:
+            break
+
+    return bin_img, mask_img, compo_img, box_infos
 
 def make_image_classes(video_dir : str):
     """画像のクラスのリストを作る。
@@ -391,16 +430,16 @@ def make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_s
                     continue
 
                 # 動画の現在位置
-                pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+                pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
 
                 # 背景画像ファイルを読む。
                 bg_img = cv2.imread(bg_img_paths[bg_img_idx])
                 bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
 
-                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, v_min)
+                bin_img, mask_img, compo_img, box_infos = make_train_data(frame, bg_img, img_size, v_min)
 
                 if mask_img is not None:
-                    network.add_image(class_idx, video_idx, pos, compo_img, corners2, bounding_box)
+                    network.add_image(class_idx, video_idx, pos, compo_img, box_infos)
 
                     class_data_cnt += 1
 

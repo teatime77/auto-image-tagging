@@ -111,7 +111,7 @@ def show_videos(class_idx, video_Idx):
 
                 prev_bg_img = bg_img
 
-                bin_img, mask_img, compo_img, aug_img, box, corners2, bounding_box = make_train_data(frame, bg_img, img_size, v_min)
+                bin_img, mask_img, compo_img, box_infos = make_train_data(frame, bg_img, img_size, v_min)
                 if mask_img is None:
 
                     black_img = np.zeros(frame.shape, dtype=np.uint8)
@@ -121,30 +121,32 @@ def show_videos(class_idx, video_Idx):
                     continue
 
                 # 原画をマスクでクリップする。
-                mask3_img = np.broadcast_to(mask_img[:, :, np.newaxis], aug_img.shape)
-                clip_img = np.where(mask3_img == 0, mask3_img, aug_img)
+                mask3_img = np.broadcast_to(mask_img[:, :, np.newaxis], frame.shape)
+                clip_img = np.where(mask3_img == 0, mask3_img, frame)
 
                 compo_img  = compo_img.copy()
 
                 if show_rect:
                     # 矩形を表示する場合
 
-                    # 外接矩形を描く。
-                    cv2.drawContours(clip_img, [ np.int0(box) ], 0, (255,0,0), 3)
+                    for box, corners2, bounding_box in box_infos:
 
-                    x, y, w, h, theta = bounding_box
+                        # 外接矩形を描く。
+                        cv2.drawContours(clip_img, [ np.int0(box) ], 0, (255,0,0), 3)
 
-                    x, y, w, h = np.int32((x, y, w, h))
+                        x, y, w, h, theta = bounding_box
+
+                        x, y, w, h = np.int32((x, y, w, h))
 
 
-                    # 座標変換後の外接矩形を描く。
-                    cv2.drawContours(compo_img, [ np.int0(corners2)  ], 0, (255,0,0), 3)
+                        # 座標変換後の外接矩形を描く。
+                        cv2.drawContours(compo_img, [ np.int0(corners2)  ], 0, (255,0,0), 3)
 
-                    # バウンディングボックスを描く。
-                    cv2.rectangle(compo_img, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
+                        # バウンディングボックスを描く。
+                        cv2.rectangle(compo_img, (int(x),int(y)), (int(x+w),int(y+h)), (0,0,255), 3)
 
-                    # バウンディングボックスの左上の頂点の位置に円を描く。
-                    cv2.circle(compo_img, (int(x), int(y)), 5, (255,255,255), -1)
+                        # バウンディングボックスの左上の頂点の位置に円を描く。
+                        cv2.circle(compo_img, (int(x), int(y)), 5, (255,255,255), -1)
 
 
                 # 原画を表示する。
@@ -423,11 +425,10 @@ if __name__ == '__main__':
 
                     break
 
-                if idx == total_data_size - 1:
-                    # 最後のデータの場合
-                    
-                    sg.popup_ok('学習データが作成されました。')
-                    break
+            else:
+                # forループの最後まで実行した場合
+                
+                sg.popup_ok('学習データが作成されました。')
             
         else:
 
