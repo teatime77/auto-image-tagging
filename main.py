@@ -17,8 +17,8 @@ cap = None
 
 transform = A.Compose([
     A.CLAHE(),
-    A.Blur(),
-    A.HueSaturationValue()
+    # A.Blur(),
+    A.HueSaturationValue(hue_shift_limit=5, sat_shift_limit=(0,30), val_shift_limit=(-5,20))
 ])
 
 
