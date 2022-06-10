@@ -208,7 +208,7 @@ def resize_bg_img(bg_img : np.ndarray, img_size : int) -> np.ndarray:
 
     return bg_img
 
-def intersect_bounding_box(bounding_box1 : list[float], bounding_box2 : list[float], img_size : int) -> bool:
+def intersect_bounding_box(bounding_box1, bounding_box2, img_size : int) -> bool:
     """2つのバウンディングボックスが交わればTrueを返す。
 
     Args:
