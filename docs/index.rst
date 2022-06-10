@@ -10,7 +10,9 @@ Welcome to Auto image Tag's documentation!
    :maxdepth: 2
    :caption: Contents:
 
+   module/index
 
+   setup
 
 Indices and tables
 ==================
