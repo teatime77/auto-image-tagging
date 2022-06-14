@@ -234,7 +234,17 @@ def intersect_bounding_box(bounding_box1, bounding_box2, img_size : int) -> bool
     return x_intersect and y_intersect
 
 
-def make_train_data(frame, bg_img, img_size, v_min):
+def make_img_tag(frame, bg_img, img_size, v_min):
+    """学習用の画像とタグを作る。
+
+    Args:
+        frame : 原画
+        bg_img : 背景画像
+        img_size : 画像サイズ
+        v_min : 明度の閾値
+
+    Returns: 二値画像, マスク, 合成画像, バウンディングボックス情報 
+    """
 
     # グレー画像
     gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
@@ -410,6 +420,9 @@ def make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_s
     # ODTKの学習データ作成のオブジェクト
     network = ODTK(output_dir, image_classes)
 
+    # 背景画像ファイルのリストをシャッフル
+    random.shuffle(bg_img_paths)
+
     # 背景画像ファイルのインデックス
     bg_img_idx = 0
 
@@ -436,7 +449,8 @@ def make_training_data(output_dir, image_classes, bg_img_paths, data_size, img_s
                 bg_img = cv2.imread(bg_img_paths[bg_img_idx])
                 bg_img_idx = (bg_img_idx + 1) % len(bg_img_paths)
 
-                bin_img, mask_img, compo_img, box_infos = make_train_data(frame, bg_img, img_size, v_min)
+                # 二値画像, マスク, 合成画像, バウンディングボックス情報
+                bin_img, mask_img, compo_img, box_infos = make_img_tag(frame, bg_img, img_size, v_min)
 
                 if mask_img is not None:
                     network.add_image(class_idx, video_idx, pos, compo_img, box_infos)

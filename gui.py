@@ -7,7 +7,7 @@ import PySimpleGUI as sg
 from util import show_image
 from odtk import ODTK
 from main import parse
-from main import make_train_data, make_image_classes, make_training_data, get_video_capture
+from main import make_img_tag, make_image_classes, make_training_data, get_video_capture
 
 iterator = None
 cap = None
@@ -111,7 +111,8 @@ def show_videos(class_idx, video_Idx):
 
                 prev_bg_img = bg_img
 
-                bin_img, mask_img, compo_img, box_infos = make_train_data(frame, bg_img, img_size, v_min)
+                # 二値画像, マスク, 合成画像, バウンディングボックス情報 
+                bin_img, mask_img, compo_img, box_infos = make_img_tag(frame, bg_img, img_size, v_min)
                 if mask_img is None:
 
                     black_img = np.zeros(frame.shape, dtype=np.uint8)
