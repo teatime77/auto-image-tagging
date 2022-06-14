@@ -4,7 +4,7 @@
 
 Google Colabで学習データの自動生成からYOLOv5による物体検出までできるのでお試しください。
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1fKynYDYure3X85tpAC7IU7lIKRiqXk6O?usp=sharing)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1vy5CFLmAdbjK-6n-qyJUyOlUtFVIotZ5?usp=sharing)
 
 # 目次
 
@@ -47,7 +47,7 @@ git clone https://github.com/teatime77/auto-img-tag.git
 <a id="tejun-1"></a>
 ### 1. カメラ アプリで動画ファイルを作成する。
 
-![camera](https://user-images.githubusercontent.com/13596557/172041640-c332617a-13b4-49a9-9f56-aff9816372c3.jpg)
+![camera](https://uroa.jp/auto-img-tag/img/camera.png)
 
 #### 起動方法
 camera.pyを実行します。
@@ -58,9 +58,17 @@ python camera.py
 
 #### 操作方法
 
-- **明度の閾値** を変えると二値画像の白の領域が変化します。
+- 左の画面は明度で二値化する場合です。
+  **明度の閾値** を変えると二値画像の白の領域が変化します。
 物体が背景から分離されるように調整します。
+<br/>
 
+- 右の画面は色相で二値化する場合です。
+
+  1. 物体を置かずに **色相を指定** ボタンをクリックして、画像の中心の色を背景色として登録します。
+
+  2. 物体を置いてから **色相の範囲** を変えると二値画像の白の領域が変化します。
+物体が背景から分離されるように調整します。
 <br/>
 
 + **動画撮影** ボタンをクリックすると録画が始まり、 **停止** ボタンで録画を終了します。
@@ -69,6 +77,8 @@ python camera.py
 
 - **写真撮影** ボタンをクリックすると原画の静止画が **capture** フォルダに保存されます。
 <br/>
+
+---
 
 <a id="tejun-2"></a>
 ### 2. クラス別に動画ファイルをフォルダに入れる。
@@ -86,6 +96,8 @@ vegetable-videoフォルダの下に onion, potato, tomato のフォルダがあ
 
 ただしOpenCVは日本語のファイル名に対応していないので、フォルダ名やファイル名には日本語を含めないでください。
 
+---
+
 <a id="tejun-3"></a>
 ### 3. 背景画像ファイルを準備する。
 
@@ -94,13 +106,15 @@ vegetable-videoフォルダの下に onion, potato, tomato のフォルダがあ
 
 COCOの2017 Val imagesは5000枚あります。
 
+---
+
 <a id="tejun-4"></a>
 ### 4. 学習データ作成アプリを実行する。
 
 main.pyを実行します。
 
 ```bash
-python main.py -i 動画ファイルのフォルダ -bg 背景画像のフォルダ -o 出力先のフォルダ
+python main.py -i 動画ファイルのフォルダ -bg 背景画像のフォルダ -o 出力先のフォルダ -dtsz １クラス当たりの学習データの数 -imsz 出力画像のサイズ
 ```
 
 実行すると出力先のフォルダに **train.json** と **img** フォルダができます。
