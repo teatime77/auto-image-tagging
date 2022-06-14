@@ -26,8 +26,17 @@ standard_resolutions = [
 ]
 """代表的な解像度のリスト"""
 
-make_square = False
+make_square = True
 # 画像を正方形にする
+
+chroma_key_hue = -1
+"""背景の色相"""
+
+hue_range = 5
+# 色相の範囲
+
+bin_method = ''
+"""明度か色相の指定"""
 
 def get_num_cameras():
     """パソコンに接続されたカメラの数を返す。
@@ -131,11 +140,62 @@ def read_one_frame():
     # 原画を表示する。
     show_image(window['-image1-'], frame)
 
-    # グレー画像
-    gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+    # 白画像
+    white_img = np.full(frame.shape, 255, dtype=np.uint8)
 
-    # 二値画像
-    bin_img = 255 - cv2.inRange(gray_img, v_min, 255)
+    if bin_method == '明度':
+        # 明度で二値画像を作る場合
+
+        # グレー画像
+        gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+
+        # 二値画像
+        bin_img = 255 - cv2.inRange(gray_img, v_min, 255)
+
+    elif bin_method == '色相' and chroma_key_hue != -1:
+        # 色相で二値画像を作り、背景の色相が指定済みの場合
+
+        # HSV画像
+        hsv_img = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV) 
+
+        # 色相
+        hue_img = hsv_img[:, :, 0]
+
+        if 180 < chroma_key_hue + hue_range:
+            # 色相の上限が180を超える場合
+
+            # 下限から180までのマスク
+            mask1 = cv2.inRange(hue_img, chroma_key_hue - hue_range, 180)
+
+            # 0から上限までのマスク
+            mask2 = cv2.inRange(hue_img, 0, chroma_key_hue + hue_range - 180)
+
+            # 2つのマスクの和
+            mask  = cv2.bitwise_or(mask1, mask2)
+
+        elif chroma_key_hue - hue_range < 0:
+            # 色相の下限が0未満の場合
+
+            # 下限から180までのマスク
+            mask1 = cv2.inRange(hue_img, chroma_key_hue - hue_range + 180, 180)
+
+            # 0から上限までのマスク
+            mask2 = cv2.inRange(hue_img, 0, chroma_key_hue + hue_range)
+
+            # 2つのマスクの和
+            mask  = cv2.bitwise_or(mask1, mask2)
+        else:
+            # 0 <= 下限 < 上限 <= 180の場合
+
+            # 色相の下限から上限までのマスク
+            mask = cv2.inRange(hue_img, chroma_key_hue - hue_range, chroma_key_hue + hue_range)
+
+        # マスク以外が255で、マスク部分を0にする。
+        bin_img = np.where(mask == 0, 255, 0).astype(np.uint8)
+
+    else:
+        bin_img = np.zeros(frame.shape[:2], dtype=np.uint8)
+
 
     # 二値画像を表示する。
     show_image(window['-image2-'], bin_img)
@@ -158,9 +218,6 @@ def read_one_frame():
     mask_img = mask_img[:, :, np.newaxis]
     mask_img = np.broadcast_to(mask_img, frame.shape)
 
-    # 白画像
-    white_img = np.full(frame.shape, 255, dtype=np.uint8)
-
     # マスクがオフの画素は白で、オンの画素は原画の色を使う。
     compo_img = np.where(mask_img == 0, white_img, frame)
 
@@ -176,9 +233,26 @@ def read_one_frame():
     # 合成画像を表示する。
     show_image(window['-image3-'], compo_img)
 
-if __name__ == '__main__':
+def get_chroma_key():
+    """画像の中心の色を返す。
 
-    print(cv2.getBuildInformation())
+    Returns: 画像の中心のBGRとHSV
+    """
+    # HSV画像
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # 画像の高さと幅
+    h, w = frame.shape[:2]
+
+    # 画像の中心の座標
+    cy = h // 2
+    cx = w // 2
+
+    # 画像の中心の色相を返す。
+    return frame[cy, cx, :], hsv[cy, cx, :]
+
+
+if __name__ == '__main__':
 
     # 動画/静止画を保存するフォルダを作る。
     os.makedirs('./capture', exist_ok=True)
@@ -216,28 +290,44 @@ if __name__ == '__main__':
                 ]
                 ,
                 [ 
-                    sg.Text('明度の閾値', size=(12,1), pad=((10,0),(20,20)) ), 
-                    sg.Spin(list(range(0, 255 + 1)), initial_value=v_min, size=(8, 1), key='-V-min-', enable_events=True )
-                ]
-                ,
-                [ 
                     sg.Text('画像の明るさ', size=(12,1), pad=((10,0),(20,20)) ), 
                     sg.Spin(list(range(-1, 255 + 1)), initial_value=0, size=(8, 1), key='-brightness-', enable_events=True )
                 ]
                 ,
                 [
-                    sg.Checkbox('画像を正方形にする。', key='-square-', enable_events=True)
+                    sg.Checkbox('画像を正方形にする。', default=make_square, key='-square-', enable_events=True, pad=((10,0),(20,20)) )
                 ]
                 ,
-                [ 
-                    sg.Button('動画撮影', key='-record/pause-', size=(8,1), pad=((10,0),(20,20)) ),
-                    sg.Push(),
-                    sg.Button('写真撮影', key='-shoot-')
+                [
+                    sg.TabGroup ([
+                        [
+                            sg.Tab('明度' ,[
+                                [
+                                    sg.Text('明度の閾値', size=(12,1), pad=((10,0),(20,20)) ), 
+                                    sg.Spin(list(range(0, 255 + 1)), initial_value=v_min, size=(8, 1), key='-V-min-', enable_events=True )
+                                ]
+                            ])
+                            ,
+                            sg.Tab('色相' ,[
+                                [
+                                    sg.Button('色相を指定', key='-chroma-key-'),
+                                    sg.Text('', size=(2,1), key='-color-sample-', relief=sg.RELIEF_SUNKEN)
+                                ]
+                                ,
+                                [
+                                    sg.Text('色相の範囲', size=(12,1), pad=((10,0),(20,20)) ), 
+                                    sg.Spin(list(range(0, 20)), initial_value=hue_range, size=(8, 1), key='-hue-range-', enable_events=True )
+                                ]
+                            ])
+                        ]
+                    ], key='-bin-method-',  enable_events=True)
                 ]
                 ,
                 [sg.VPush()]
                 ,
                 [
+                    sg.Button('動画撮影', key='-record/pause-', size=(8,1), pad=((10,0),(20,20)) ),
+                    sg.Button('写真撮影', key='-shoot-'),
                     sg.Push(),
                     sg.Button('閉じる', key='-close-')
                 ]
@@ -268,7 +358,7 @@ if __name__ == '__main__':
     ]
 
     # メインウィンドウ
-    window = sg.Window('カメラ', layout, font='Any 20')
+    window = sg.Window('カメラ', layout, font='Any 16')
 
     while True:
 
@@ -321,7 +411,15 @@ if __name__ == '__main__':
                 writer.release()
                 writer = None
 
-                if write_cnt == 0:
+                if not os.path.isfile(write_path):
+                    # 動画ファイルへ書けなかった場合
+
+                    print("=" * 80 + '\n\t\tOpenCVのビルド情報\n' + "=" * 80)
+                    print(cv2.getBuildInformation())
+
+                    sg.popup('動画ファイルを保存できません。\n\nOpenCVのビルド情報を確認してください。')
+
+                elif write_cnt == 0:
                     # 動画ファイルへの書き込み件数が0の場合
 
                     sg.popup('物体の画像がありません。')
@@ -332,9 +430,18 @@ if __name__ == '__main__':
                 else:
                     sg.popup_quick_message(f'動画を保存しました。\n\n{write_path}', font='Any 20', background_color='blue')
 
+        elif event == '-bin-method-':
+            # 明度または色相のタブ
+
+            bin_method = values[event]
+
         elif event == '-V-min-':
             # 明度の閾値(最小値)
             v_min = int(values[event])
+
+        elif event == '-hue-range-':
+            # 色相の範囲
+            hue_range = int(values[event])
 
         elif event == '-brightness-':
             # 画像の明るさ
@@ -358,6 +465,19 @@ if __name__ == '__main__':
             cv2.imwrite(img_path, frame)
 
             sg.popup_quick_message(f'画像を保存しました。\n\n{img_path}', font='Any 20', background_color='blue')
+
+        elif event == '-chroma-key-':
+            # 色相を指定ボタン
+
+            # 画像の中心の色
+            bgr, hsv = get_chroma_key()
+
+            # 背景の色相
+            chroma_key_hue = int(hsv[0])
+
+            # 背景色を表示
+            bg_color = '#%02X%02X%02X' % (bgr[2], bgr[1], bgr[0])
+            window['-color-sample-'].update(background_color=bg_color)
 
         elif event == '__TIMEOUT__':
             if cap is None:
